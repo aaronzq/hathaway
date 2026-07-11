@@ -1,27 +1,11 @@
-#include "grating.h"
-#include "buzzer.h"
-
-// ledPIN is available for other uses (not the grating on/off). Duration defaults to 3 s.
-#define TFT_BL_PIN A2
-#define BUZZER_PIN 11
-
-#define FREQ 1000
-#define PWM_RESOLUTION 8   // LEDC duty-cycle resolution in bits (0-255)
+#include "behavior_board.h"
+#include "behavior_task.h"
 
 GratingHandler grating(TFT_BL_PIN);
-BuzzerHandler buzzer(BUZZER_PIN);
+BuzzerHandler buzzer;
+LickHandler lick1, lick2;
 
-// Trial parameter pools.
-const float ANGLES[]    = {0, 45, 90, 135};
-const float CONTRASTS[] = {0.2f, 0.4f, 0.6f, 0.8f, 1.0f};
-const int   NUM_ANGLES    = sizeof(ANGLES) / sizeof(ANGLES[0]);
-const int   NUM_CONTRASTS = sizeof(CONTRASTS) / sizeof(CONTRASTS[0]);
 
-const float PERIOD = 45.0f;  // grating period, px
-const float SPEED  = 160.0f; // drift speed, px/s
-
-const unsigned int FREQS[] = {3000, 6000, 9000, 12000};
-const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
 
 void startTrial() {
   float angle    = ANGLES[random(NUM_ANGLES)];
@@ -41,7 +25,31 @@ void playRandomNote() {
   buzzer.playNote(freq, 150);
 }
 
+bool handleLick1() {
+  unsigned long now = millis();
+  if (lick1.update()) {
+    Serial.print(F("LICK1,"));
+    Serial.println(now);
+    return true;
+  }
+  return false;
+}
+
+bool handleLick2() {
+  unsigned long now = millis();
+  if (lick2.update()) {
+    Serial.print(F("LICK2,"));
+    Serial.println(now);
+    return true;
+  }
+  return false;
+}
+
 void setup() {
+  buzzer = BuzzerHandler(BUZZER_PIN);
+  lick1 = LickHandler(LICK1_PIN);
+  lick2 = LickHandler(LICK2_PIN);
+
   Serial.begin(115200);
   randomSeed(esp_random()); // hardware RNG seed so trials differ each run
   startTrial();
@@ -55,4 +63,6 @@ void loop() {
     playRandomNote();
   }
   buzzer.update();
+  handleLick1();
+  handleLick2();
 }
