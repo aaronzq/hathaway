@@ -7,6 +7,8 @@
 
 #define LICK1_PIN 4
 #define LICK2_PIN 3
+#define SPOUT1_PIN 8 
+#define SPOUT2_PIN 10
 
 
 

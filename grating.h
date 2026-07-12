@@ -14,7 +14,7 @@
 
 // Set to 1 to print drawGrating()/update() timings (microseconds) over Serial.
 // Set to 0 for production to remove the profiling overhead entirely.
-#define GRATING_PROFILE 1
+#define GRATING_PROFILE 0
 
 class GratingHandler {
 public:
@@ -37,6 +37,7 @@ private:
     int W, H;
 
     int ledPin;
+    bool ledConfigured; // true once pinMode(OUTPUT) has been applied to ledPin
     unsigned long duration; // trial display time in seconds; 0 = indefinite
     bool initialized;
 

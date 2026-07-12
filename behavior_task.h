@@ -20,3 +20,6 @@ const float SPEED  = 160.0f; // drift speed, px/s
 // Buzzer
 const unsigned int FREQS[] = {3000, 6000, 9000, 12000};
 const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
+
+const unsigned long REWARD_DURATION = 30;
+const unsigned long REWARD_INTERVAL = 5000;

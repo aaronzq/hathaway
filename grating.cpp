@@ -3,7 +3,8 @@
 #include "esp_memory_utils.h"
 
 GratingHandler::GratingHandler()
-    : tft(), spr(&tft), W(0), H(0), ledPin(-1), duration(DEFAULT_DISPLAY_DURATION),
+    : tft(), spr(&tft), W(0), H(0), ledPin(-1), ledConfigured(false),
+      duration(DEFAULT_DISPLAY_DURATION),
       initialized(false), spriteInternal(GRATING_USE_INTERNAL_RAM),
       spriteActuallyInternal(false), freeInternalAfter(0), trialStartMs(0),
       active(false), period(0), angle(0), contrast(1.0f), cosA(1), sinA(0),
@@ -13,7 +14,8 @@ GratingHandler::GratingHandler()
 }
 
 GratingHandler::GratingHandler(int ledPIN, unsigned long duration)
-    : tft(), spr(&tft), W(0), H(0), ledPin(ledPIN), duration(duration),
+    : tft(), spr(&tft), W(0), H(0), ledPin(ledPIN), ledConfigured(false),
+      duration(duration),
       initialized(false), spriteInternal(GRATING_USE_INTERNAL_RAM),
       spriteActuallyInternal(false), freeInternalAfter(0), trialStartMs(0),
       active(false), period(0), angle(0), contrast(1.0f), cosA(1), sinA(0),
@@ -41,9 +43,8 @@ void GratingHandler::initHardware() {
 
   allocateSprite();
 
-  if (ledPin >= 0) {
-    pinMode(ledPin, OUTPUT);
-  }
+  // The LED/backlight pin is configured lazily in switchOn(), so it works even
+  // if switchOn() is called before the first drawGrating().
 
   initialized = true;
 }
@@ -398,7 +399,12 @@ bool GratingHandler::update() {
 }
 
 void GratingHandler::switchOn(bool on) {
-  if (ledPin >= 0) {
-    digitalWrite(ledPin, on ? HIGH : LOW);
+  if (ledPin < 0) return;
+  // Configure the pin on first use so switchOn() works regardless of whether
+  // drawGrating()/initHardware() has run yet.
+  if (!ledConfigured) {
+    pinMode(ledPin, OUTPUT);
+    ledConfigured = true;
   }
+  digitalWrite(ledPin, on ? HIGH : LOW);
 }
