@@ -6,7 +6,6 @@ BuzzerHandler buzzer;
 LickHandler lick1, lick2;
 
 
-
 void startTrial() {
   float angle    = ANGLES[random(NUM_ANGLES)];
   float contrast = CONTRASTS[random(NUM_CONTRASTS)];
