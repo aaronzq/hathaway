@@ -5,6 +5,13 @@ GratingHandler grating(TFT_BL_PIN);
 BuzzerHandler buzzer;
 LickHandler lick1, lick2;
 Rewarder rewarder1, rewarder2;
+HX711 scale;
+SwitchHandler sw;
+Magneto magnet;
+
+bool enReward;
+unsigned long nextTime;
+unsigned int rewardNum;
 
 void startTrial() {
   float angle    = ANGLES[random(NUM_ANGLES)];
@@ -27,13 +34,24 @@ void playRandomNote() {
 bool handleLick1() {
   unsigned long now = millis();
   if (lick1.update()) {
-    
-    rewarder1.deliver_reward();
-    
     Serial.print(F("LICK1,"));
     Serial.println(now);
-
+    if (enReward) {
+      rewarder1.deliver_reward();
+      rewardNum ++;
+      enReward = false;
+      nextTime = REWARD_INTERVAL + now;
+      Serial.print(F("REWARD:"));
+      Serial.print(rewardNum);
+      Serial.print(",");
+      Serial.println(now);
+    } 
     return true;
+  }
+  if (!enReward) {
+    if (now >= nextTime) {
+      enReward = true;
+    }
   }
   return false;
 }
@@ -51,16 +69,44 @@ bool handleLick2() {
   return false;
 }
 
+bool handleSwitch() {
+  unsigned long now = millis();
+  if (sw.update()) {
+    if (sw.getState()) {
+      // magnet.magnetic_start();
+      Serial.print(F("POSITION:1,"));
+    } else {
+      // magnet.halt();
+      Serial.print(F("POSITION:0,"));
+    }
+    Serial.println(now);
+    return true;
+  }
+  return false;
+}
+
 void setup() {
   buzzer = BuzzerHandler(BUZZER_PIN);
   lick1 = LickHandler(LICK1_PIN);
   lick2 = LickHandler(LICK2_PIN);
   rewarder1 = Rewarder(SPOUT1_PIN, REWARD_DURATION);  // use default duration
   rewarder2 = Rewarder(SPOUT2_PIN, REWARD_DURATION);
-  Serial.begin(115200);
+  sw = SwitchHandler(SWITCH_PIN);
+  magnet = Magneto(MAGNET_PIN, MAG_FIX_DURATION);
+
+  scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
+  scale.set_scale();	
+  scale.tare();	
+  scale.set_scale(640.7f);
+  
   randomSeed(esp_random()); // hardware RNG seed so trials differ each run
-  grating.switchOn(true);
+  grating.switchOn(false);
+
+  Serial.begin(115200);
+
   startTrial();
+  enReward = true;
+  rewardNum = 0;
 }
 
 void loop() {
@@ -72,7 +118,14 @@ void loop() {
   }
   buzzer.update();
   handleLick1();
-  handleLick2();
+  // handleLick2();
   rewarder1.update();
-  rewarder2.update();
+  // rewarder2.update();
+  handleSwitch();
+  magnet.update();
+  if (scale.is_ready()) {
+    float reading = scale.get_units(1);
+    Serial.print("HX711 reading: ");
+    Serial.println(reading);
+  } 
 }

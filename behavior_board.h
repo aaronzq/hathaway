@@ -10,5 +10,11 @@
 #define SPOUT1_PIN 8 
 #define SPOUT2_PIN 10
 
+#define LOADCELL_DOUT_PIN 40
+#define LOADCELL_SCK_PIN 41
+
+#define SWITCH_PIN 13
+
+#define MAGNET_PIN 12
 
 

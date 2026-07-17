@@ -5,6 +5,7 @@
 #include "magnet.h"
 #include "grating.h"
 #include "buzzer.h"
+#include "HX711.h"
 
 
 // TFT display
@@ -21,5 +22,7 @@ const float SPEED  = 160.0f; // drift speed, px/s
 const unsigned int FREQS[] = {3000, 6000, 9000, 12000};
 const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
 
-const unsigned long REWARD_DURATION = 30;
-const unsigned long REWARD_INTERVAL = 5000;
+const unsigned long REWARD_DURATION = 50;
+const unsigned long REWARD_INTERVAL = 3000;
+
+const unsigned long MAG_FIX_DURATION = 5000;
