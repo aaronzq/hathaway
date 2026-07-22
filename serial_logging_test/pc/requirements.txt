@@ -1,0 +1,4 @@
+# PC-side ingest service dependencies
+pyserial>=3.5          # reading the ESP32 over USB (COM port)
+psycopg2-binary>=2.9   # PostgreSQL / TimescaleDB backend
+# sqlite3 is in the Python standard library (no install needed)

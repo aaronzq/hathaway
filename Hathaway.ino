@@ -17,10 +17,10 @@ void startTrial() {
   float angle    = ANGLES[random(NUM_ANGLES)];
   float contrast = CONTRASTS[random(NUM_CONTRASTS)];
 
-  Serial.print("Trial -> angle: ");
-  Serial.print(angle, 0);
-  Serial.print(" deg, contrast: ");
-  Serial.println(contrast, 1);
+  // Serial.print("Trial -> angle: ");
+  // Serial.print(angle, 0);
+  // Serial.print(" deg, contrast: ");
+  // Serial.println(contrast, 1);
 
   grating.drawGrating(PERIOD, angle, contrast);
   grating.configScroll(SPEED);
@@ -73,10 +73,10 @@ bool handleSwitch() {
   unsigned long now = millis();
   if (sw.update()) {
     if (sw.getState()) {
-      // magnet.magnetic_start();
+      magnet.magnetic_start();
       Serial.print(F("POSITION:1,"));
     } else {
-      // magnet.halt();
+      magnet.halt();
       Serial.print(F("POSITION:0,"));
     }
     Serial.println(now);
@@ -114,7 +114,7 @@ void loop() {
   // immediately start the next randomized trial.
   if (!grating.update()) {
     startTrial();
-    playRandomNote();
+    // playRandomNote();
   }
   buzzer.update();
   handleLick1();

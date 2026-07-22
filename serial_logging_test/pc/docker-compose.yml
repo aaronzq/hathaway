@@ -1,0 +1,51 @@
+# ============================================================================
+# One command brings up the whole PC backend:
+#     docker compose up -d
+#   * TimescaleDB (PostgreSQL) on localhost:5432   -> the ingest service writes here
+#   * Grafana          on http://localhost:3000    -> live dashboards (admin/admin)
+#
+# The database schema is applied automatically on first start from schema.sql.
+# Data persists in named volumes across restarts.
+# ============================================================================
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: hathaway_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hathaway
+      POSTGRES_PASSWORD: hathaway
+      POSTGRES_DB: hathaway
+    ports:
+      - "5432:5432"                       # so the native Python ingest can connect
+    volumes:
+      - hathaway_pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hathaway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hathaway_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # allow dashboard auto-refresh faster than the 5s default
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: "500ms"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - hathaway_grafana:/var/lib/grafana
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+volumes:
+  hathaway_pgdata:
+  hathaway_grafana:

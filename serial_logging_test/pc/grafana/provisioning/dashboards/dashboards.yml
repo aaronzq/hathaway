@@ -1,0 +1,16 @@
+apiVersion: 1
+
+providers:
+  - name: Hathaway
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    editable: true
+    # allow editing + saving in the UI (persists in Grafana's volume).
+    # The file re-applies (overwriting UI edits) only if you change the file.
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      # re-read dashboard files every 10s
+      updateIntervalSeconds: 10

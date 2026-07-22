@@ -25,4 +25,4 @@ const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
 const unsigned long REWARD_DURATION = 50;
 const unsigned long REWARD_INTERVAL = 3000;
 
-const unsigned long MAG_FIX_DURATION = 5000;
+const unsigned long MAG_FIX_DURATION = 30000;

@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: Hathaway
+    uid: hathaway_pg
+    type: postgres
+    access: proxy
+    url: timescaledb:5432
+    user: hathaway
+    isDefault: true
+    jsonData:
+      database: hathaway
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: true
+    secureJsonData:
+      password: hathaway
