@@ -10,7 +10,7 @@ public:
     Magneto(int pin, unsigned long duration = DEFAULT_FIX_DURATION);
 
     void magnetic_start(unsigned long duration = 0);
-    void update();
+    bool update();
     void halt();
 
 private:

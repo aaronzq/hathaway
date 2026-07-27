@@ -85,6 +85,28 @@ bool handleSwitch() {
   return false;
 }
 
+void handleScale() {
+  if (scale.is_ready()) {
+    float reading = scale.get_units(1);
+    Serial.print("HX711 reading: ");
+    Serial.println(reading);
+    if (reading >= SCALE_HIGH_THRESH || reading <= SCALE_LOW_THRESH) {
+      magnet.halt();
+    }
+  } 
+}
+
+void handleManget() {
+  static int lastMagnet = -1;   // -1 = unknown, forces first print
+  unsigned long now = millis();
+  int state = magnet.update() ? 1 : 0;
+  if (state != lastMagnet) {
+    lastMagnet = state;
+    Serial.print(state ? F("MAGNET:1,") : F("MAGNET:0,"));
+    Serial.println(now);
+  }
+}
+
 void setup() {
   buzzer = BuzzerHandler(BUZZER_PIN);
   lick1 = LickHandler(LICK1_PIN);
@@ -114,7 +136,7 @@ void loop() {
   // immediately start the next randomized trial.
   if (!grating.update()) {
     startTrial();
-    // playRandomNote();
+    playRandomNote();
   }
   buzzer.update();
   handleLick1();
@@ -122,10 +144,6 @@ void loop() {
   rewarder1.update();
   // rewarder2.update();
   handleSwitch();
-  magnet.update();
-  if (scale.is_ready()) {
-    float reading = scale.get_units(1);
-    Serial.print("HX711 reading: ");
-    Serial.println(reading);
-  } 
+  handleManget();
+  handleScale();
 }

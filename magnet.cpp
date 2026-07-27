@@ -23,7 +23,7 @@ void Magneto::magnetic_start(unsigned long duration)
     closeTime = millis() + duration;
 }
 
-void Magneto::update()
+bool Magneto::update()
 {
     if (isOn) {
         unsigned long now = millis();
@@ -34,6 +34,7 @@ void Magneto::update()
             isOn = false;
         }
     }
+    return isOn;
 }
 
 void Magneto::halt()

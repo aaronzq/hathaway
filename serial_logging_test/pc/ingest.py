@@ -85,6 +85,7 @@ def parse_hathaway(line):
     Recognised lines (see hathaway.ino):
       HX711 reading: <float>      -> continuous WEIGHT sample
       POSITION:<0|1>,<ms>         -> POSITION state sample (binary)
+      MAGNET:<0|1>,<ms>           -> MAGNET state sample (binary; on/off)
       REWARD:<n>,<ms>             -> BOTH: REWARD_COUNT sample (n) + REWARD event
       LICK1,<ms> / LICK2,<ms>     -> LICK event (channel 1 / 2)
     Returns a list of record dicts (0, 1, or 2). Unknown lines -> [].
@@ -104,6 +105,12 @@ def parse_hathaway(line):
             pos = int(parts[0].strip())
             return [{"kind": "S", "type": "POSITION", "channel": 0,
                      "value": float(pos), "t_us": _dev_us(parts, 1)}]
+
+        if s.startswith("MAGNET:"):
+            parts = s[len("MAGNET:"):].split(",")
+            mag = int(parts[0].strip())
+            return [{"kind": "S", "type": "MAGNET", "channel": 0,
+                     "value": float(mag), "t_us": _dev_us(parts, 1)}]
 
         if s.startswith("REWARD:"):
             parts = s[len("REWARD:"):].split(",")
@@ -293,6 +300,7 @@ def simulate_lines(hz, rig):
     period = 1.0 / hz
     reward_num = 0
     position = 0
+    magnet = 0
     while True:
         now = time.monotonic()
         t_ms = int((now - t0) * 1000)
@@ -302,6 +310,10 @@ def simulate_lines(hz, rig):
         if random.random() < 0.02:
             position ^= 1
             yield f"POSITION:{position},{t_ms}"
+        # occasional magnet on/off flip
+        if random.random() < 0.02:
+            magnet ^= 1
+            yield f"MAGNET:{magnet},{t_ms}"
         # sparse licks
         if random.random() < 0.15:
             yield f"LICK1,{t_ms}"
