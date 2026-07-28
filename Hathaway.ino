@@ -13,6 +13,74 @@ bool enReward;
 unsigned long nextTime;
 unsigned int rewardNum;
 
+// --------------------------------------------------------------------------- //
+// Telemetry pipeline
+// The control loop (core 1) only enqueues small records; a comms task on core 0
+// owns Serial and formats/writes the wire lines. This keeps blocking Serial I/O
+// off the control loop, so sensor reading and control never stall on the UART.
+// The wire format is unchanged, so ingest.py / Grafana need no changes.
+// --------------------------------------------------------------------------- //
+enum TelemType : uint8_t {
+  TELEM_WEIGHT,     // "HX711 reading: <float>"   (no device timestamp)
+  TELEM_POSITION,   // "POSITION:<0|1>,<ms>"
+  TELEM_MAGNET,     // "MAGNET:<0|1>,<ms>"
+  TELEM_LICK,       // "LICK<ch>,<ms>"
+  TELEM_REWARD,     // "REWARD:<count>,<ms>"
+};
+
+struct TelemRec {
+  uint8_t  type;      // TelemType
+  uint8_t  channel;   // LICK spout (1/2); unused otherwise
+  float    value;     // weight, 0/1 state, or reward count
+  uint32_t dev_ms;    // millis() captured at the event
+};
+
+static const int TELEM_QUEUE_LEN = 128;
+QueueHandle_t telemQueue = nullptr;
+TaskHandle_t  commsTaskHandle = nullptr;
+volatile uint32_t telemDropped = 0;   // records dropped when the queue is full
+
+// Called from the control core. Non-blocking: never stalls the loop.
+static inline void emitTelem(uint8_t type, uint8_t channel, float value,
+                             uint32_t dev_ms) {
+  TelemRec r = { type, channel, value, dev_ms };
+  if (telemQueue == nullptr || xQueueSend(telemQueue, &r, 0) != pdTRUE) {
+    telemDropped++;   // drop rather than block control
+  }
+}
+
+// Runs on core 0. Owns Serial; blocking writes here are harmless.
+void commsTask(void *pv) {
+  TelemRec r;
+  char line[48];
+  for (;;) {
+    if (xQueueReceive(telemQueue, &r, portMAX_DELAY) != pdTRUE) continue;
+    int n = 0;
+    switch (r.type) {
+      case TELEM_WEIGHT:   // no device timestamp, matching the original line
+        n = snprintf(line, sizeof(line), "HX711 reading: %.2f\n", r.value);
+        break;
+      case TELEM_POSITION:
+        n = snprintf(line, sizeof(line), "POSITION:%d,%lu\n",
+                     (int)r.value, (unsigned long)r.dev_ms);
+        break;
+      case TELEM_MAGNET:
+        n = snprintf(line, sizeof(line), "MAGNET:%d,%lu\n",
+                     (int)r.value, (unsigned long)r.dev_ms);
+        break;
+      case TELEM_LICK:
+        n = snprintf(line, sizeof(line), "LICK%u,%lu\n",
+                     (unsigned)r.channel, (unsigned long)r.dev_ms);
+        break;
+      case TELEM_REWARD:
+        n = snprintf(line, sizeof(line), "REWARD:%u,%lu\n",
+                     (unsigned)r.value, (unsigned long)r.dev_ms);
+        break;
+    }
+    if (n > 0) Serial.write((const uint8_t*)line, (size_t)n);
+  }
+}
+
 void startTrial() {
   float angle    = ANGLES[random(NUM_ANGLES)];
   float contrast = CONTRASTS[random(NUM_CONTRASTS)];
@@ -34,18 +102,14 @@ void playRandomNote() {
 bool handleLick1() {
   unsigned long now = millis();
   if (lick1.update()) {
-    Serial.print(F("LICK1,"));
-    Serial.println(now);
+    emitTelem(TELEM_LICK, 1, 1.0f, now);
     if (enReward) {
       rewarder1.deliver_reward();
       rewardNum ++;
       enReward = false;
       nextTime = REWARD_INTERVAL + now;
-      Serial.print(F("REWARD:"));
-      Serial.print(rewardNum);
-      Serial.print(",");
-      Serial.println(now);
-    } 
+      emitTelem(TELEM_REWARD, 0, (float)rewardNum, now);
+    }
     return true;
   }
   if (!enReward) {
@@ -62,8 +126,7 @@ bool handleLick2() {
 
     rewarder2.deliver_reward();
 
-    Serial.print(F("LICK2,"));
-    Serial.println(now);
+    emitTelem(TELEM_LICK, 2, 1.0f, now);
     return true;
   }
   return false;
@@ -74,12 +137,11 @@ bool handleSwitch() {
   if (sw.update()) {
     if (sw.getState()) {
       magnet.magnetic_start();
-      Serial.print(F("POSITION:1,"));
+      emitTelem(TELEM_POSITION, 0, 1.0f, now);
     } else {
       magnet.halt();
-      Serial.print(F("POSITION:0,"));
+      emitTelem(TELEM_POSITION, 0, 0.0f, now);
     }
-    Serial.println(now);
     return true;
   }
   return false;
@@ -88,8 +150,7 @@ bool handleSwitch() {
 void handleScale() {
   if (scale.is_ready()) {
     float reading = scale.get_units(1);
-    Serial.print("HX711 reading: ");
-    Serial.println(reading);
+    emitTelem(TELEM_WEIGHT, 0, reading, millis());
     if (reading >= SCALE_HIGH_THRESH || reading <= SCALE_LOW_THRESH) {
       magnet.halt();
     }
@@ -102,8 +163,7 @@ void handleManget() {
   int state = magnet.update() ? 1 : 0;
   if (state != lastMagnet) {
     lastMagnet = state;
-    Serial.print(state ? F("MAGNET:1,") : F("MAGNET:0,"));
-    Serial.println(now);
+    emitTelem(TELEM_MAGNET, 0, (float)state, now);
   }
 }
 
@@ -125,6 +185,12 @@ void setup() {
   grating.switchOn(false);
 
   Serial.begin(115200);
+
+  // Telemetry pipeline: create the queue, then start the comms task on core 0.
+  // (Serial must be up first, since the comms task owns it.)
+  telemQueue = xQueueCreate(TELEM_QUEUE_LEN, sizeof(TelemRec));
+  xTaskCreatePinnedToCore(commsTask, "comms", 4096, nullptr, 1,
+                          &commsTaskHandle, 0);   // core 0 owns Serial
 
   startTrial();
   enReward = true;
