@@ -17,6 +17,7 @@ public:
 
     void deliver_reward(unsigned long duration = 0);
     void update();
+    void setRewardDuration(unsigned long duration);  // update default open time
 
 private:
     int rewardPin;

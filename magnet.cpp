@@ -42,3 +42,8 @@ void Magneto::halt()
     digitalWrite(magnetPin, LOW);
     isOn = false;
 }
+
+void Magneto::setFixDuration(unsigned long duration)
+{
+    defaultFixDuration = duration;
+}

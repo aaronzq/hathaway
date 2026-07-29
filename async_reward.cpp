@@ -23,6 +23,11 @@ void Rewarder::deliver_reward(unsigned long duration)
     closeTime = millis() + duration;
 }
 
+void Rewarder::setRewardDuration(unsigned long duration)
+{
+    defaultRewardDuration = duration;
+}
+
 void Rewarder::update()
 {
     if (isOpen) {

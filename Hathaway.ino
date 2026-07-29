@@ -18,8 +18,9 @@ unsigned int rewardNum1, rewardNum2;
 // The control loop (core 1) only enqueues small records; a comms task on core 0
 // owns Serial and formats/writes the wire lines. This keeps blocking Serial I/O
 // off the control loop, so sensor reading and control never stall on the UART.
-// Wire format matches the original prints (REWARD additionally carries the
-// spout channel: "REWARD:<ch>,<count>,<ms>"), parsed by ingest.py.
+// Every emitted line is prefixed with "<RIG_ID>|" so a database fed by several
+// rigs can tell them apart, e.g. "1|LICK1,12345". REWARD also carries the spout
+// channel: "1|REWARD:<ch>,<count>,<ms>". ingest.py must strip the "<id>|" prefix.
 // --------------------------------------------------------------------------- //
 enum TelemType : uint8_t {
   TELEM_WEIGHT,     // "HX711 reading: <float>"   (no device timestamp)
@@ -27,7 +28,51 @@ enum TelemType : uint8_t {
   TELEM_MAGNET,     // "MAGNET:<0|1>,<ms>"
   TELEM_LICK,       // "LICK<ch>,<ms>"
   TELEM_REWARD,     // "REWARD:<ch>,<count>,<ms>"
+  TELEM_PARAM,      // "PARAM:<name>,<value>"  (ack of an applied SET)
 };
+
+// --------------------------------------------------------------------------- //
+// Tunable parameters
+// Set live from the host with a "SET <NAME> <VALUE>" line. The comms task (core
+// 0) parses/validates it and enqueues a ParamCmd; the control loop (core 1)
+// applies it, so the parameter globals and the rewarder/magnet objects only
+// ever change from one core. Each applied change is echoed as a PARAM: ack.
+// --------------------------------------------------------------------------- //
+enum ParamId : uint8_t {
+  PARAM_REWARD_DURATION1,
+  PARAM_REWARD_DURATION2,
+  PARAM_REWARD_INTERVAL1,
+  PARAM_REWARD_INTERVAL2,
+  PARAM_MAG_FIX_DURATION,
+  PARAM_SCALE_HIGH,
+  PARAM_SCALE_LOW,
+  PARAM_DUMP = 200,   // not a stored param: request a full parameter dump
+};
+
+struct ParamCmd {
+  uint8_t id;      // ParamId
+  float   value;   // new value (cast on apply)
+};
+
+struct ParamSpec { const char *name; uint8_t id; float lo; float hi; };
+static const ParamSpec PARAM_TABLE[] = {
+  { "REWARD_DURATION1",  PARAM_REWARD_DURATION1, 0,   10000 },
+  { "REWARD_DURATION2",  PARAM_REWARD_DURATION2, 0,   10000 },
+  { "REWARD_INTERVAL1",  PARAM_REWARD_INTERVAL1, 0,  600000 },
+  { "REWARD_INTERVAL2",  PARAM_REWARD_INTERVAL2, 0,  600000 },
+  { "MAG_FIX_DURATION",  PARAM_MAG_FIX_DURATION, 0,  600000 },
+  { "SCALE_HIGH_THRESH", PARAM_SCALE_HIGH,   -10000,  10000 },
+  { "SCALE_LOW_THRESH",  PARAM_SCALE_LOW,    -10000,  10000 },
+};
+static const int PARAM_COUNT = sizeof(PARAM_TABLE) / sizeof(PARAM_TABLE[0]);
+
+static const char *paramName(uint8_t id) {
+  for (int i = 0; i < PARAM_COUNT; i++)
+    if (PARAM_TABLE[i].id == id) return PARAM_TABLE[i].name;
+  return "?";
+}
+
+QueueHandle_t cmdQueue = nullptr;   // comms task -> control loop
 
 struct TelemRec {
   uint8_t  type;      // TelemType
@@ -50,36 +95,96 @@ static inline void emitTelem(uint8_t type, uint8_t channel, float value,
   }
 }
 
-// Runs on core 0. Owns Serial; blocking writes here are harmless.
+// Format a telemetry record into its exact wire line, prefixed with "<RIG_ID>|".
+static int formatTelem(char *line, size_t cap, const TelemRec &r) {
+  int p = snprintf(line, cap, "%d|", RIG_ID);   // rig prefix on every line
+  if (p < 0 || (size_t)p >= cap) return 0;
+  char *b = line + p;
+  size_t c = cap - p;
+  int m = 0;
+  switch (r.type) {
+    case TELEM_WEIGHT:   // no device timestamp, matching the original line
+      m = snprintf(b, c, "HX711 reading: %.2f\n", r.value); break;
+    case TELEM_POSITION:
+      m = snprintf(b, c, "POSITION:%d,%lu\n",
+                   (int)r.value, (unsigned long)r.dev_ms); break;
+    case TELEM_MAGNET:
+      m = snprintf(b, c, "MAGNET:%d,%lu\n",
+                   (int)r.value, (unsigned long)r.dev_ms); break;
+    case TELEM_LICK:
+      m = snprintf(b, c, "LICK%u,%lu\n",
+                   (unsigned)r.channel, (unsigned long)r.dev_ms); break;
+    case TELEM_REWARD:
+      m = snprintf(b, c, "REWARD:%u,%u,%lu\n",
+                   (unsigned)r.channel, (unsigned)r.value,
+                   (unsigned long)r.dev_ms); break;
+    case TELEM_PARAM:
+      m = snprintf(b, c, "PARAM:%s,%g\n", paramName(r.channel), r.value); break;
+    default:
+      return 0;
+  }
+  return (m > 0) ? p + m : 0;
+}
+
+// Parse one inbound line ("SET <NAME> <VALUE>") and, if valid, enqueue a
+// ParamCmd for the control loop to apply. Runs on the comms task (core 0),
+// which owns Serial, so error replies are written directly here. The success
+// ack (PARAM:) is emitted by the control loop once the change is applied.
+static void handleCommandLine(const char *s) {
+  // "DUMP" / "GET" -> re-emit all current parameters (control loop does it).
+  if (strncmp(s, "DUMP", 4) == 0 || strncmp(s, "GET", 3) == 0) {
+    ParamCmd cmd = { PARAM_DUMP, 0.0f };
+    if (cmdQueue) xQueueSend(cmdQueue, &cmd, 0);
+    return;
+  }
+  char name[24];
+  double val;
+  if (sscanf(s, "SET %23s %lf", name, &val) != 2) {
+    Serial.printf("%d|#ERR parse: %s\n", RIG_ID, s);
+    return;
+  }
+  for (int i = 0; i < PARAM_COUNT; i++) {
+    if (strcmp(name, PARAM_TABLE[i].name) == 0) {
+      if (val < PARAM_TABLE[i].lo || val > PARAM_TABLE[i].hi) {
+        Serial.printf("%d|#ERR range: %s=%g\n", RIG_ID, name, val);
+        return;
+      }
+      ParamCmd cmd = { PARAM_TABLE[i].id, (float)val };
+      if (cmdQueue == nullptr || xQueueSend(cmdQueue, &cmd, 0) != pdTRUE)
+        Serial.printf("%d|#ERR busy: %s\n", RIG_ID, name);
+      return;
+    }
+  }
+  Serial.printf("%d|#ERR unknown: %s\n", RIG_ID, name);
+}
+
+// Runs on core 0. Owns Serial: writes telemetry AND reads inbound commands.
 void commsTask(void *pv) {
   TelemRec r;
-  char line[48];
+  char line[64];   // room for the "<rig>|" prefix plus the longest line
+  static char rx[64];
+  static size_t rxlen = 0;
   for (;;) {
-    if (xQueueReceive(telemQueue, &r, portMAX_DELAY) != pdTRUE) continue;
-    int n = 0;
-    switch (r.type) {
-      case TELEM_WEIGHT:   // no device timestamp, matching the original line
-        n = snprintf(line, sizeof(line), "HX711 reading: %.2f\n", r.value);
-        break;
-      case TELEM_POSITION:
-        n = snprintf(line, sizeof(line), "POSITION:%d,%lu\n",
-                     (int)r.value, (unsigned long)r.dev_ms);
-        break;
-      case TELEM_MAGNET:
-        n = snprintf(line, sizeof(line), "MAGNET:%d,%lu\n",
-                     (int)r.value, (unsigned long)r.dev_ms);
-        break;
-      case TELEM_LICK:
-        n = snprintf(line, sizeof(line), "LICK%u,%lu\n",
-                     (unsigned)r.channel, (unsigned long)r.dev_ms);
-        break;
-      case TELEM_REWARD:
-        n = snprintf(line, sizeof(line), "REWARD:%u,%u,%lu\n",
-                     (unsigned)r.channel, (unsigned)r.value,
-                     (unsigned long)r.dev_ms);
-        break;
+    // 1) Drain outgoing telemetry (short wait so we also poll input).
+    if (xQueueReceive(telemQueue, &r, pdMS_TO_TICKS(5)) == pdTRUE) {
+      int n = formatTelem(line, sizeof(line), r);
+      if (n > 0) Serial.write((const uint8_t*)line, (size_t)n);
+      while (xQueueReceive(telemQueue, &r, 0) == pdTRUE) {   // flush the rest
+        n = formatTelem(line, sizeof(line), r);
+        if (n > 0) Serial.write((const uint8_t*)line, (size_t)n);
+      }
     }
-    if (n > 0) Serial.write((const uint8_t*)line, (size_t)n);
+    // 2) Read inbound bytes; dispatch on each complete line.
+    while (Serial.available() > 0) {
+      char c = (char)Serial.read();
+      if (c == '\n' || c == '\r') {
+        if (rxlen > 0) { rx[rxlen] = '\0'; handleCommandLine(rx); rxlen = 0; }
+      } else if (rxlen < sizeof(rx) - 1) {
+        rx[rxlen++] = c;
+      } else {
+        rxlen = 0;   // overflow; drop the line
+      }
+    }
   }
 }
 
@@ -109,7 +214,7 @@ bool handleLick1() {
       rewarder1.deliver_reward();
       rewardNum1 ++;
       enReward = false;
-      nextTime = REWARD_INTERVAL + now;
+      nextTime = REWARD_INTERVAL1 + now;   // shared gate, spout-1 refractory
       emitTelem(TELEM_REWARD, 1, (float)rewardNum1, now);
     }
     return true;
@@ -130,7 +235,7 @@ bool handleLick2() {
       rewarder2.deliver_reward();
       rewardNum2 ++;
       enReward = false;
-      nextTime = REWARD_INTERVAL + now;
+      nextTime = REWARD_INTERVAL2 + now;   // shared gate, spout-2 refractory
       emitTelem(TELEM_REWARD, 2, (float)rewardNum2, now);
     }
     return true;
@@ -178,12 +283,67 @@ void handleManget() {
   }
 }
 
+// Current value of a tunable parameter (for acks / dumps).
+static float paramValue(uint8_t id) {
+  switch (id) {
+    case PARAM_REWARD_DURATION1: return (float)REWARD_DURATION1;
+    case PARAM_REWARD_DURATION2: return (float)REWARD_DURATION2;
+    case PARAM_REWARD_INTERVAL1: return (float)REWARD_INTERVAL1;
+    case PARAM_REWARD_INTERVAL2: return (float)REWARD_INTERVAL2;
+    case PARAM_MAG_FIX_DURATION: return (float)MAG_FIX_DURATION;
+    case PARAM_SCALE_HIGH:       return SCALE_HIGH_THRESH;
+    case PARAM_SCALE_LOW:        return SCALE_LOW_THRESH;
+  }
+  return 0.0f;
+}
+
+// Emit every current parameter as a PARAM: line so the host/database learns the
+// full parameter state in effect (used at startup and on a DUMP/GET command).
+static void dumpParams(uint32_t now) {
+  for (int i = 0; i < PARAM_COUNT; i++)
+    emitTelem(TELEM_PARAM, PARAM_TABLE[i].id, paramValue(PARAM_TABLE[i].id), now);
+}
+
+// Apply a validated parameter change on the control core, then ack it.
+// Runs only here, so the tunable globals and rewarder/magnet objects have a
+// single writer (no cross-core races with the comms task).
+static void applyParam(const ParamCmd &cmd) {
+  if (cmd.id == PARAM_DUMP) { dumpParams(millis()); return; }
+  switch (cmd.id) {
+    case PARAM_REWARD_DURATION1:
+      REWARD_DURATION1 = (unsigned long)cmd.value;
+      rewarder1.setRewardDuration(REWARD_DURATION1);
+      break;
+    case PARAM_REWARD_DURATION2:
+      REWARD_DURATION2 = (unsigned long)cmd.value;
+      rewarder2.setRewardDuration(REWARD_DURATION2);
+      break;
+    case PARAM_REWARD_INTERVAL1:
+      REWARD_INTERVAL1 = (unsigned long)cmd.value;
+      break;
+    case PARAM_REWARD_INTERVAL2:
+      REWARD_INTERVAL2 = (unsigned long)cmd.value;
+      break;
+    case PARAM_MAG_FIX_DURATION:
+      MAG_FIX_DURATION = (unsigned long)cmd.value;
+      magnet.setFixDuration(MAG_FIX_DURATION);
+      break;
+    case PARAM_SCALE_HIGH:
+      SCALE_HIGH_THRESH = cmd.value;
+      break;
+    case PARAM_SCALE_LOW:
+      SCALE_LOW_THRESH = cmd.value;
+      break;
+  }
+  emitTelem(TELEM_PARAM, cmd.id, cmd.value, millis());   // PARAM: ack
+}
+
 void setup() {
   buzzer = BuzzerHandler(BUZZER_PIN);
   lick1 = LickHandler(LICK1_PIN);
   lick2 = LickHandler(LICK2_PIN);
-  rewarder1 = Rewarder(SPOUT1_PIN, REWARD_DURATION);  // use default duration
-  rewarder2 = Rewarder(SPOUT2_PIN, REWARD_DURATION);
+  rewarder1 = Rewarder(SPOUT1_PIN, REWARD_DURATION1);
+  rewarder2 = Rewarder(SPOUT2_PIN, REWARD_DURATION2);
   sw = SwitchHandler(SWITCH_PIN);
   magnet = Magneto(MAGNET_PIN, MAG_FIX_DURATION);
 
@@ -200,6 +360,7 @@ void setup() {
   // Telemetry pipeline: create the queue, then start the comms task on core 0.
   // (Serial must be up first, since the comms task owns it.)
   telemQueue = xQueueCreate(TELEM_QUEUE_LEN, sizeof(TelemRec));
+  cmdQueue   = xQueueCreate(8, sizeof(ParamCmd));   // host SET commands
   xTaskCreatePinnedToCore(commsTask, "comms", 4096, nullptr, 1,
                           &commsTaskHandle, 0);   // core 0 owns Serial
 
@@ -207,9 +368,17 @@ void setup() {
   enReward = true;
   rewardNum1 = 0;
   rewardNum2 = 0;
+
+  // Affirm the current parameters at startup so the database knows what was in
+  // effect from the beginning of this session.
+  dumpParams(millis());
 }
 
 void loop() {
+  // Apply any parameter changes the host sent via SET (validated on core 0).
+  ParamCmd cmd;
+  while (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) applyParam(cmd);
+
   // update() drives the scroll and returns false once the 3 s trial elapses;
   // immediately start the next randomized trial.
   if (!grating.update()) {

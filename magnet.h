@@ -12,6 +12,7 @@ public:
     void magnetic_start(unsigned long duration = 0);
     bool update();
     void halt();
+    void setFixDuration(unsigned long duration);  // update default hold time
 
 private:
     int magnetPin;
