@@ -86,7 +86,9 @@ def parse_hathaway(line):
       HX711 reading: <float>      -> continuous WEIGHT sample
       POSITION:<0|1>,<ms>         -> POSITION state sample (binary)
       MAGNET:<0|1>,<ms>           -> MAGNET state sample (binary; on/off)
-      REWARD:<n>,<ms>             -> BOTH: REWARD_COUNT sample (n) + REWARD event
+      REWARD:<ch>,<n>,<ms>        -> BOTH: REWARD_COUNT sample (n) + REWARD event,
+                                     on spout channel <ch> (legacy REWARD:<n>,<ms>
+                                     is still accepted as channel 0)
       LICK1,<ms> / LICK2,<ms>     -> LICK event (channel 1 / 2)
     Returns a list of record dicts (0, 1, or 2). Unknown lines -> [].
     Each dict: {kind 'S'|'E', type, channel, value, t_us (or None)}.
@@ -114,12 +116,18 @@ def parse_hathaway(line):
 
         if s.startswith("REWARD:"):
             parts = s[len("REWARD:"):].split(",")
-            num = int(parts[0].strip())
-            t_us = _dev_us(parts, 1)
+            if len(parts) >= 3:              # REWARD:<ch>,<count>,<ms>
+                ch = int(parts[0].strip())
+                num = int(parts[1].strip())
+                t_us = _dev_us(parts, 2)
+            else:                            # legacy REWARD:<count>,<ms>
+                ch = 0
+                num = int(parts[0].strip())
+                t_us = _dev_us(parts, 1)
             return [
-                {"kind": "S", "type": "REWARD_COUNT", "channel": 0,
-                 "value": float(num), "t_us": t_us},   # cumulative line
-                {"kind": "E", "type": "REWARD", "channel": 0,
+                {"kind": "S", "type": "REWARD_COUNT", "channel": ch,
+                 "value": float(num), "t_us": t_us},   # cumulative line (per spout)
+                {"kind": "E", "type": "REWARD", "channel": ch,
                  "value": float(num), "t_us": t_us},    # event dot
             ]
 

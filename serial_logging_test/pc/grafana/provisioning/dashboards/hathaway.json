@@ -4,12 +4,12 @@
   "tags": ["hathaway"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 100,
+  "version": 101,
   "editable": true,
   "liveNow": false,
-  "refresh": "1s",
+  "refresh": "500ms",
   "time": {
-    "from": "now-1m",
+    "from": "now-2m",
     "to": "now"
   },
   "timepicker": {
@@ -108,7 +108,7 @@
       "id": 4,
       "gridPos": { "x": 0, "y": 6, "w": 24, "h": 6 },
       "type": "timeseries",
-      "title": "Lick 1 & Reward events",
+      "title": "Lick & Reward events",
       "description": "",
       "datasource": { "type": "postgres", "uid": "hathaway_pg" },
       "targets": [
@@ -117,14 +117,28 @@
           "datasource": { "type": "postgres", "uid": "hathaway_pg" },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT host_ts AS time, 1 AS lick FROM events WHERE type = 'LICK' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY host_ts"
+          "rawSql": "SELECT host_ts AS time, 1 AS lick1 FROM events WHERE type = 'LICK' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY host_ts"
         },
         {
           "refId": "B",
           "datasource": { "type": "postgres", "uid": "hathaway_pg" },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT host_ts AS time, 2 AS reward FROM events WHERE type = 'REWARD' AND $__timeFilter(host_ts) ORDER BY host_ts"
+          "rawSql": "SELECT host_ts AS time, 3 AS lick2 FROM events WHERE type = 'LICK' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY host_ts"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT host_ts AS time, 1.5 AS reward1 FROM events WHERE type = 'REWARD' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY host_ts"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT host_ts AS time, 3.5 AS reward2 FROM events WHERE type = 'REWARD' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY host_ts"
         }
       ],
       "fieldConfig": {
@@ -153,7 +167,7 @@
             "stacking": { "group": "A", "mode": "none" },
             "thresholdsStyle": { "mode": "off" }
           },
-          "max": 2.5,
+          "max": 4.5,
           "min": 0.5,
           "thresholds": {
             "mode": "absolute",
@@ -261,7 +275,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS rewards FROM events WHERE type = 'REWARD' AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles'"
+          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1, count(*) FILTER (WHERE channel = 2) AS reward2 FROM events WHERE type = 'REWARD' AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles'"
         }
       ],
       "fieldConfig": {
@@ -306,7 +320,15 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ts AS time, reward_index FROM (SELECT host_ts AS ts, count(*) OVER (ORDER BY host_ts) AS reward_index FROM events WHERE type = 'REWARD' AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
+          "rawSql": "SELECT ts AS time, reward_index AS reward1 FROM (SELECT host_ts AS ts, count(*) OVER (ORDER BY host_ts) AS reward_index FROM events WHERE type = 'REWARD' AND channel = 1 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, reward_index AS reward2 FROM (SELECT host_ts AS ts, count(*) OVER (ORDER BY host_ts) AS reward_index FROM events WHERE type = 'REWARD' AND channel = 2 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
         }
       ],
       "fieldConfig": {

@@ -11,21 +11,22 @@ Magneto magnet;
 
 bool enReward;
 unsigned long nextTime;
-unsigned int rewardNum;
+unsigned int rewardNum1, rewardNum2;
 
 // --------------------------------------------------------------------------- //
 // Telemetry pipeline
 // The control loop (core 1) only enqueues small records; a comms task on core 0
 // owns Serial and formats/writes the wire lines. This keeps blocking Serial I/O
 // off the control loop, so sensor reading and control never stall on the UART.
-// The wire format is unchanged, so ingest.py / Grafana need no changes.
+// Wire format matches the original prints (REWARD additionally carries the
+// spout channel: "REWARD:<ch>,<count>,<ms>"), parsed by ingest.py.
 // --------------------------------------------------------------------------- //
 enum TelemType : uint8_t {
   TELEM_WEIGHT,     // "HX711 reading: <float>"   (no device timestamp)
   TELEM_POSITION,   // "POSITION:<0|1>,<ms>"
   TELEM_MAGNET,     // "MAGNET:<0|1>,<ms>"
   TELEM_LICK,       // "LICK<ch>,<ms>"
-  TELEM_REWARD,     // "REWARD:<count>,<ms>"
+  TELEM_REWARD,     // "REWARD:<ch>,<count>,<ms>"
 };
 
 struct TelemRec {
@@ -73,8 +74,9 @@ void commsTask(void *pv) {
                      (unsigned)r.channel, (unsigned long)r.dev_ms);
         break;
       case TELEM_REWARD:
-        n = snprintf(line, sizeof(line), "REWARD:%u,%lu\n",
-                     (unsigned)r.value, (unsigned long)r.dev_ms);
+        n = snprintf(line, sizeof(line), "REWARD:%u,%u,%lu\n",
+                     (unsigned)r.channel, (unsigned)r.value,
+                     (unsigned long)r.dev_ms);
         break;
     }
     if (n > 0) Serial.write((const uint8_t*)line, (size_t)n);
@@ -105,10 +107,10 @@ bool handleLick1() {
     emitTelem(TELEM_LICK, 1, 1.0f, now);
     if (enReward) {
       rewarder1.deliver_reward();
-      rewardNum ++;
+      rewardNum1 ++;
       enReward = false;
       nextTime = REWARD_INTERVAL + now;
-      emitTelem(TELEM_REWARD, 0, (float)rewardNum, now);
+      emitTelem(TELEM_REWARD, 1, (float)rewardNum1, now);
     }
     return true;
   }
@@ -123,11 +125,20 @@ bool handleLick1() {
 bool handleLick2() {
   unsigned long now = millis();
   if (lick2.update()) {
-
-    rewarder2.deliver_reward();
-
     emitTelem(TELEM_LICK, 2, 1.0f, now);
+    if (enReward) {
+      rewarder2.deliver_reward();
+      rewardNum2 ++;
+      enReward = false;
+      nextTime = REWARD_INTERVAL + now;
+      emitTelem(TELEM_REWARD, 2, (float)rewardNum2, now);
+    }
     return true;
+  }
+  if (!enReward) {
+    if (now >= nextTime) {
+      enReward = true;
+    }
   }
   return false;
 }
@@ -194,7 +205,8 @@ void setup() {
 
   startTrial();
   enReward = true;
-  rewardNum = 0;
+  rewardNum1 = 0;
+  rewardNum2 = 0;
 }
 
 void loop() {
@@ -206,9 +218,9 @@ void loop() {
   }
   buzzer.update();
   handleLick1();
-  // handleLick2();
+  handleLick2();
   rewarder1.update();
-  // rewarder2.update();
+  rewarder2.update();
   handleSwitch();
   handleManget();
   handleScale();
