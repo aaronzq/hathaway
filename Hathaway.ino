@@ -1,5 +1,6 @@
 #include "behavior_board.h"
 #include "behavior_task.h"
+#include "protocol.h"      // TelemType/TelemRec/ParamId/ParamCmd/ParamSpec
 
 GratingHandler grating(TFT_BL_PIN);
 BuzzerHandler buzzer;
@@ -21,48 +22,21 @@ unsigned int rewardNum1, rewardNum2;
 // Every emitted line is prefixed with "<RIG_ID>|" so a database fed by several
 // rigs can tell them apart, e.g. "1|LICK1,12345". REWARD also carries the spout
 // channel: "1|REWARD:<ch>,<count>,<ms>". ingest.py must strip the "<id>|" prefix.
+//
+// Tunable parameters are set live from the host with a "SET <NAME> <VALUE>" line.
+// The comms task (core 0) parses/validates it and enqueues a ParamCmd; the
+// control loop (core 1) applies it, so the parameter globals and the
+// rewarder/magnet objects only ever change from one core. Each applied change is
+// echoed as a PARAM: ack. (Types: TelemRec / ParamCmd / ParamSpec in protocol.h)
 // --------------------------------------------------------------------------- //
-enum TelemType : uint8_t {
-  TELEM_WEIGHT,     // "HX711 reading: <float>"   (no device timestamp)
-  TELEM_POSITION,   // "POSITION:<0|1>,<ms>"
-  TELEM_MAGNET,     // "MAGNET:<0|1>,<ms>"
-  TELEM_LICK,       // "LICK<ch>,<ms>"
-  TELEM_REWARD,     // "REWARD:<ch>,<count>,<ms>"
-  TELEM_PARAM,      // "PARAM:<name>,<value>"  (ack of an applied SET)
-};
-
-// --------------------------------------------------------------------------- //
-// Tunable parameters
-// Set live from the host with a "SET <NAME> <VALUE>" line. The comms task (core
-// 0) parses/validates it and enqueues a ParamCmd; the control loop (core 1)
-// applies it, so the parameter globals and the rewarder/magnet objects only
-// ever change from one core. Each applied change is echoed as a PARAM: ack.
-// --------------------------------------------------------------------------- //
-enum ParamId : uint8_t {
-  PARAM_REWARD_DURATION1,
-  PARAM_REWARD_DURATION2,
-  PARAM_REWARD_INTERVAL1,
-  PARAM_REWARD_INTERVAL2,
-  PARAM_MAG_FIX_DURATION,
-  PARAM_SCALE_HIGH,
-  PARAM_SCALE_LOW,
-  PARAM_DUMP = 200,   // not a stored param: request a full parameter dump
-};
-
-struct ParamCmd {
-  uint8_t id;      // ParamId
-  float   value;   // new value (cast on apply)
-};
-
-struct ParamSpec { const char *name; uint8_t id; float lo; float hi; };
 static const ParamSpec PARAM_TABLE[] = {
-  { "REWARD_DURATION1",  PARAM_REWARD_DURATION1, 0,   10000 },
-  { "REWARD_DURATION2",  PARAM_REWARD_DURATION2, 0,   10000 },
-  { "REWARD_INTERVAL1",  PARAM_REWARD_INTERVAL1, 0,  600000 },
-  { "REWARD_INTERVAL2",  PARAM_REWARD_INTERVAL2, 0,  600000 },
-  { "MAG_FIX_DURATION",  PARAM_MAG_FIX_DURATION, 0,  600000 },
-  { "SCALE_HIGH_THRESH", PARAM_SCALE_HIGH,   -10000,  10000 },
-  { "SCALE_LOW_THRESH",  PARAM_SCALE_LOW,    -10000,  10000 },
+  { "REWARD_DURATION1",  PARAM_REWARD_DURATION1, 0,  1000 },
+  { "REWARD_DURATION2",  PARAM_REWARD_DURATION2, 0,  1000 },
+  { "REWARD_INTERVAL1",  PARAM_REWARD_INTERVAL1, 0,  60000 },
+  { "REWARD_INTERVAL2",  PARAM_REWARD_INTERVAL2, 0,  60000 },
+  { "MAG_FIX_DURATION",  PARAM_MAG_FIX_DURATION, 0,  60000 },
+  { "SCALE_HIGH_THRESH", PARAM_SCALE_HIGH,   -50,  50 },
+  { "SCALE_LOW_THRESH",  PARAM_SCALE_LOW,    -50,  50 },
 };
 static const int PARAM_COUNT = sizeof(PARAM_TABLE) / sizeof(PARAM_TABLE[0]);
 
@@ -73,13 +47,6 @@ static const char *paramName(uint8_t id) {
 }
 
 QueueHandle_t cmdQueue = nullptr;   // comms task -> control loop
-
-struct TelemRec {
-  uint8_t  type;      // TelemType
-  uint8_t  channel;   // LICK spout (1/2); unused otherwise
-  float    value;     // weight, 0/1 state, or reward count
-  uint32_t dev_ms;    // millis() captured at the event
-};
 
 static const int TELEM_QUEUE_LEN = 128;
 QueueHandle_t telemQueue = nullptr;
@@ -120,6 +87,8 @@ static int formatTelem(char *line, size_t cap, const TelemRec &r) {
                    (unsigned long)r.dev_ms); break;
     case TELEM_PARAM:
       m = snprintf(b, c, "PARAM:%s,%g\n", paramName(r.channel), r.value); break;
+    case TELEM_TARE:
+      m = snprintf(b, c, "#TARE ok\n"); break;
     default:
       return 0;
   }
@@ -134,6 +103,12 @@ static void handleCommandLine(const char *s) {
   // "DUMP" / "GET" -> re-emit all current parameters (control loop does it).
   if (strncmp(s, "DUMP", 4) == 0 || strncmp(s, "GET", 3) == 0) {
     ParamCmd cmd = { PARAM_DUMP, 0.0f };
+    if (cmdQueue) xQueueSend(cmdQueue, &cmd, 0);
+    return;
+  }
+  // "TARE" -> run scale.tare() once (on the control loop).
+  if (strncmp(s, "TARE", 4) == 0) {
+    ParamCmd cmd = { PARAM_TARE, 0.0f };
     if (cmdQueue) xQueueSend(cmdQueue, &cmd, 0);
     return;
   }
@@ -309,6 +284,11 @@ static void dumpParams(uint32_t now) {
 // single writer (no cross-core races with the comms task).
 static void applyParam(const ParamCmd &cmd) {
   if (cmd.id == PARAM_DUMP) { dumpParams(millis()); return; }
+  if (cmd.id == PARAM_TARE) {          // one-shot: zero the scale
+    scale.tare();                      // blocks ~1 s (averages several readings)
+    emitTelem(TELEM_TARE, 0, 0.0f, millis());
+    return;
+  }
   switch (cmd.id) {
     case PARAM_REWARD_DURATION1:
       REWARD_DURATION1 = (unsigned long)cmd.value;

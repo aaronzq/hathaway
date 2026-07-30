@@ -8,7 +8,6 @@ in batches. Continuous samples go to `samples`, discrete events to `events`.
 
 Backends (choose with --db):
   postgres : PostgreSQL / TimescaleDB      (production; needs psycopg2)
-  sqlite   : a single local .db file       (zero-install quick start)
   print    : just echo parsed records      (smoke test, no DB)
 
 Sources (choose with --source):
@@ -20,11 +19,8 @@ Examples
   python ingest.py --source serial --port COM3 --db postgres \
       --dsn "host=localhost dbname=hathaway user=hathaway password=hathaway"
 
-  # Zero-install local test with the board
-  python ingest.py --source serial --port COM3 --db sqlite --sqlite-path data.db
-
   # No board at all: pipe the simulator in
-  python fake_serial.py | python ingest.py --source stdin --db sqlite
+  python fake_serial.py | python ingest.py --source stdin --db print
 """
 import argparse
 import sys
@@ -169,55 +165,6 @@ class PrintDB(BaseDB):
         sys.stdout.flush()
 
 
-class SqliteDB(BaseDB):
-    def __init__(self, path):
-        import sqlite3
-        self.conn = sqlite3.connect(path)
-        self.conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS sessions(
-              session_id INTEGER PRIMARY KEY AUTOINCREMENT,
-              rig_id INTEGER, started_at TEXT, ended_at TEXT, note TEXT);
-            CREATE TABLE IF NOT EXISTS samples(
-              session_id INTEGER, rig_id INTEGER, seq INTEGER, t_us INTEGER,
-              host_ts TEXT, type TEXT, channel INTEGER, value REAL);
-            CREATE TABLE IF NOT EXISTS events(
-              session_id INTEGER, rig_id INTEGER, seq INTEGER, t_us INTEGER,
-              host_ts TEXT, type TEXT, channel INTEGER, value REAL);
-            CREATE INDEX IF NOT EXISTS idx_s_ts ON samples(host_ts);
-            CREATE INDEX IF NOT EXISTS idx_e_ts ON events(host_ts);
-            """
-        )
-        self.conn.commit()
-        self.session_id = None
-
-    def start_session(self, rig_id, note):
-        cur = self.conn.execute(
-            "INSERT INTO sessions(rig_id, started_at, note) VALUES(?,?,?)",
-            (rig_id, dt.datetime.now().isoformat(), note),
-        )
-        self.conn.commit()
-        self.session_id = cur.lastrowid
-        return self.session_id
-
-    def write(self, samples, events):
-        if samples:
-            self.conn.executemany(
-                "INSERT INTO samples VALUES(?,?,?,?,?,?,?,?)", samples)
-        if events:
-            self.conn.executemany(
-                "INSERT INTO events VALUES(?,?,?,?,?,?,?,?)", events)
-        self.conn.commit()
-
-    def close(self):
-        if self.session_id is not None:
-            self.conn.execute(
-                "UPDATE sessions SET ended_at=? WHERE session_id=?",
-                (dt.datetime.now().isoformat(), self.session_id))
-            self.conn.commit()
-        self.conn.close()
-
-
 class PostgresDB(BaseDB):
     def __init__(self, dsn):
         import psycopg2
@@ -269,8 +216,6 @@ class PostgresDB(BaseDB):
 def make_db(args):
     if args.db == "print":
         return PrintDB()
-    if args.db == "sqlite":
-        return SqliteDB(args.sqlite_path)
     if args.db == "postgres":
         return PostgresDB(args.dsn)
     raise ValueError(args.db)
@@ -425,12 +370,11 @@ def main():
                         "csv = the seq,t_us,kind,type,channel,value protocol")
     p.add_argument("--hz", type=float, default=30.0,
                    help="fake data rate when --source simulate")
-    p.add_argument("--db", choices=["postgres", "sqlite", "print"], default="sqlite")
+    p.add_argument("--db", choices=["postgres", "print"], default="postgres")
     p.add_argument("--dsn",
                    default="host=localhost dbname=hathaway "
                            "user=hathaway password=hathaway",
                    help="PostgreSQL connection string")
-    p.add_argument("--sqlite-path", default="hathaway.db")
     p.add_argument("--rig", type=int, default=1, help="fallback rig id")
     p.add_argument("--note", default="", help="session note")
     args = p.parse_args()
