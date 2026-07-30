@@ -330,7 +330,7 @@ void setup() {
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
   scale.set_scale();	
   scale.tare();	
-  scale.set_scale(640.7f);
+  scale.set_scale(636.5f);
   
   randomSeed(esp_random()); // hardware RNG seed so trials differ each run
   grating.switchOn(false);
