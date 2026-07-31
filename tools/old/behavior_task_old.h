@@ -31,7 +31,7 @@ const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
 // Mutable (not const) so the command handler can update them live. This header
 // is included only by hathaway.ino, so single-definition is fine.
 unsigned long REWARD_DURATION1 = 50;    // spout 1 solenoid open time, ms
-unsigned long REWARD_DURATION2 = 42;    // spout 2 solenoid open time, ms
+unsigned long REWARD_DURATION2 = 50;    // spout 2 solenoid open time, ms
 unsigned long REWARD_INTERVAL1 = 3000;  // refractory after a spout-1 reward, ms
 unsigned long REWARD_INTERVAL2 = 3000;  // refractory after a spout-2 reward, ms
 unsigned long MAG_FIX_DURATION = 5000;

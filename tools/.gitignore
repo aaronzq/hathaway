@@ -1,0 +1,8 @@
+golden
+golden_out.txt
+wire_lines.txt
+new_extracted.inc
+new_stubs.inc
+old/hathaway_old.ino
+old/protocol_old.h
+old/old_extracted.inc

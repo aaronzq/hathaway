@@ -75,67 +75,97 @@ def _dev_us(parts, idx):
     return None
 
 
-def parse_hathaway(line):
-    """Parse the human-readable serial output of the real hathaway.ino.
+# --------------------------------------------------------------------------- #
+# Hathaway wire format
+#
+# Every data line has one shape:
+#
+#     <RIG_ID>|NAME:<channel>,<value>,<device_ms>
+#
+# so this parser needs no per-message knowledge. The only thing it cannot read
+# off the line is whether a message is a state SAMPLE or an EVENT, and the rig
+# announces that at startup with one "#DEF <NAME>,<S|E>" line per message type.
+# Adding a new message to the firmware therefore requires no change here.
+#
+# KNOWN_KINDS is only a fallback for a rig that has already been streaming when
+# ingest starts, so its #DEF burst was missed.
+# --------------------------------------------------------------------------- #
+KNOWN_KINDS = {
+    "WEIGHT": "S", "POSITION": "S", "MAGNET": "S",
+    "LICK": "E", "REWARD": "E",
+}
 
-    Recognised lines (see hathaway.ino):
-      HX711 reading: <float>      -> continuous WEIGHT sample
-      POSITION:<0|1>,<ms>         -> POSITION state sample (binary)
-      MAGNET:<0|1>,<ms>           -> MAGNET state sample (binary; on/off)
-      REWARD:<ch>,<n>,<ms>        -> BOTH: REWARD_COUNT sample (n) + REWARD event,
-                                     on spout channel <ch> (legacy REWARD:<n>,<ms>
-                                     is still accepted as channel 0)
-      LICK1,<ms> / LICK2,<ms>     -> LICK event (channel 1 / 2)
-    Returns a list of record dicts (0, 1, or 2). Unknown lines -> [].
-    Each dict: {kind 'S'|'E', type, channel, value, t_us (or None)}.
-    """
+# Learned from "#DEF" lines at runtime; takes precedence over KNOWN_KINDS.
+_schema = {}
+
+# Types that also produce a cumulative-count sample alongside the event.
+COUNTED_EVENTS = {"REWARD": "REWARD_COUNT"}
+
+
+def strip_rig_prefix(line):
+    """Split '<rig>|<body>' into (rig_id, body). No prefix -> (None, line)."""
+    head, sep, rest = line.partition("|")
+    if sep and head.isdigit():
+        return int(head), rest
+    return None, line
+
+
+def parse_schema_line(line):
+    """Learn a message kind from '#DEF <NAME>,<S|E>'. True if it was one."""
     s = line.strip()
+    if not s.startswith("#DEF "):
+        return False
+    name, _, kind = s[len("#DEF "):].partition(",")
+    kind = kind.strip().upper()
+    if name.strip() and kind in ("S", "E"):
+        _schema[name.strip()] = kind
+        return True
+    return False
+
+
+def parse_hathaway(line):
+    """Parse one line of hathaway serial output.
+
+    Returns a list of record dicts (0, 1, or 2); unknown lines -> [].
+    Each dict: {kind 'S'|'E', type, channel, value, t_us (or None)}.
+    The '<rig>|' prefix is optional here, so callers that already stripped it
+    (control_panel.py) and callers that did not both work.
+    """
+    _, s = strip_rig_prefix(line.strip())
+    s = s.strip()
     if not s:
         return []
+    if s.startswith("#"):            # #DEF / #ERR / #TARE ok ...
+        parse_schema_line(s)
+        return []
+
+    name, sep, rest = s.partition(":")
+    if not sep:
+        return []
+    name = name.strip()
+    parts = rest.split(",")
+    if len(parts) != 3:
+        return []
     try:
-        if s.startswith("HX711 reading:"):
-            val = float(s.split(":", 1)[1].strip())
-            return [{"kind": "S", "type": "WEIGHT", "channel": 0,
-                     "value": val, "t_us": None}]  # no device time in this line
-
-        if s.startswith("POSITION:"):
-            parts = s[len("POSITION:"):].split(",")
-            pos = int(parts[0].strip())
-            return [{"kind": "S", "type": "POSITION", "channel": 0,
-                     "value": float(pos), "t_us": _dev_us(parts, 1)}]
-
-        if s.startswith("MAGNET:"):
-            parts = s[len("MAGNET:"):].split(",")
-            mag = int(parts[0].strip())
-            return [{"kind": "S", "type": "MAGNET", "channel": 0,
-                     "value": float(mag), "t_us": _dev_us(parts, 1)}]
-
-        if s.startswith("REWARD:"):
-            parts = s[len("REWARD:"):].split(",")
-            if len(parts) >= 3:              # REWARD:<ch>,<count>,<ms>
-                ch = int(parts[0].strip())
-                num = int(parts[1].strip())
-                t_us = _dev_us(parts, 2)
-            else:                            # legacy REWARD:<count>,<ms>
-                ch = 0
-                num = int(parts[0].strip())
-                t_us = _dev_us(parts, 1)
-            return [
-                {"kind": "S", "type": "REWARD_COUNT", "channel": ch,
-                 "value": float(num), "t_us": t_us},   # cumulative line (per spout)
-                {"kind": "E", "type": "REWARD", "channel": ch,
-                 "value": float(num), "t_us": t_us},    # event dot
-            ]
-
-        if s.startswith("LICK1"):
-            return [{"kind": "E", "type": "LICK", "channel": 1,
-                     "value": 1.0, "t_us": _dev_us(s.split(","), 1)}]
-        if s.startswith("LICK2"):
-            return [{"kind": "E", "type": "LICK", "channel": 2,
-                     "value": 1.0, "t_us": _dev_us(s.split(","), 1)}]
+        channel = int(parts[0])
+        value = float(parts[1])
+        t_us = _dev_us(parts, 2)
     except (ValueError, IndexError):
         return []
-    return []
+
+    kind = _schema.get(name) or KNOWN_KINDS.get(name)
+    if kind is None:
+        # Unannounced message type: record it as an event rather than drop it.
+        kind = "E"
+
+    recs = []
+    counted = COUNTED_EVENTS.get(name)
+    if counted:                      # cumulative line, for step plots
+        recs.append({"kind": "S", "type": counted, "channel": channel,
+                     "value": value, "t_us": t_us})
+    recs.append({"kind": kind, "type": name, "channel": channel,
+                 "value": value, "t_us": t_us})
+    return recs
 
 
 # --------------------------------------------------------------------------- #
@@ -254,26 +284,30 @@ def simulate_lines(hz, rig):
     reward_num = 0
     position = 0
     magnet = 0
+    # Announce the message set exactly as the firmware does at startup.
+    for name, kind in (("WEIGHT", "S"), ("POSITION", "S"), ("MAGNET", "S"),
+                       ("LICK", "E"), ("REWARD", "E")):
+        yield f"1|#DEF {name},{kind}"
     while True:
         now = time.monotonic()
         t_ms = int((now - t0) * 1000)
         # continuous weight
-        yield f"HX711 reading: {20.0 + 2.0 * random.random():.2f}"
+        yield f"1|WEIGHT:1,{20.0 + 2.0 * random.random():.2f},{t_ms}"
         # occasional position flip
         if random.random() < 0.02:
             position ^= 1
-            yield f"POSITION:{position},{t_ms}"
+            yield f"1|POSITION:1,{position},{t_ms}"
         # occasional magnet on/off flip
         if random.random() < 0.02:
             magnet ^= 1
-            yield f"MAGNET:{magnet},{t_ms}"
+            yield f"1|MAGNET:1,{magnet},{t_ms}"
         # sparse licks
         if random.random() < 0.15:
-            yield f"LICK1,{t_ms}"
+            yield f"1|LICK:{random.choice((1, 2))},1,{t_ms}"
         # rare rewards
         if random.random() < 0.03:
             reward_num += 1
-            yield f"REWARD:{reward_num},{t_ms}"
+            yield f"1|REWARD:1,{reward_num},{t_ms}"
         time.sleep(period)
 
 
@@ -319,6 +353,11 @@ def run(args):
                 rec = parse_line(line)
                 recs = [rec] if rec else []
             else:  # hathaway (real firmware / simulate)
+                # Every firmware line is prefixed "<rig>|" so several rigs can
+                # share one stream; take the rig id from the line when present.
+                line_rig, _ = strip_rig_prefix(s)
+                if line_rig is not None:
+                    rig_id = line_rig
                 recs = parse_hathaway(line)
             if not recs:
                 continue

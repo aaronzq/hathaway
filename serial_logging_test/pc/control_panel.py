@@ -147,6 +147,12 @@ class SerialLink:
                 self._ser = None
                 buf = b""
                 self._stop.wait(2.0)                   # backoff, then reconnect
+        # stopped: release the port so it is neither read nor retried
+        try:
+            if self._ser is not None:
+                self._ser.close()
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------- #
@@ -187,6 +193,20 @@ class Controller:
             return True, f"opening {port} (will refresh on connect)"
         link.send("DUMP")   # already open: refresh now
         return True, f"refreshing {port}"
+
+    def close_port(self, port):
+        """Stop and release a port entirely: its reader thread exits, so it is
+        no longer read, logged, or retried in the background."""
+        link = self.link_by_port.pop(port, None)
+        if link is None:
+            return False, f"{port} is not open"
+        link.stop()
+        rig_id = self.port_rig.pop(port, None)
+        self.port_status.pop(port, None)
+        self.port_rx.pop(port, None)
+        if rig_id is not None and self.link_by_rig.get(rig_id) is link:
+            del self.link_by_rig[rig_id]
+        return True, f"closed {port}"
 
     def list_available_ports(self):
         names = set(self.link_by_port.keys())
@@ -247,8 +267,9 @@ class Controller:
         st.err = None
         st.last_seen = time.time()
 
-        # Comments (#ERR, #...) -> just show in the log.
+        # Comments (#DEF, #ERR, #...) -> learn the schema, then show in the log.
         if rest.startswith("#"):
+            ingest.parse_schema_line(rest)   # "#DEF <NAME>,<S|E>"
             st.log.append(rest)
             return
 
@@ -393,6 +414,11 @@ def make_app():
         ok, msg = CTRL.open_port(body.port)
         return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
 
+    @app.post("/api/close")
+    def close_port(body: OpenBody):
+        ok, msg = CTRL.close_port(body.port)
+        return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
+
     @app.post("/api/rig/{rig_id}/set")
     def set_param(rig_id: int, body: SetBody):
         ok, msg = CTRL.send_set(rig_id, body.name, body.value)
@@ -416,140 +442,210 @@ def make_app():
 
 
 HTML_PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Rig Control Panel</title>
+<html><head><meta charset="utf-8"><title>Hathaway control panel</title>
 <style>
- body{font-family:system-ui,Arial,sans-serif;margin:16px;background:#0f1115;color:#e6e6e6}
- h1{font-size:18px;margin:0 0 4px}
- .sub{color:#8b93a2;font-size:12px;margin:0 0 12px}
- .bar{margin:0 0 14px}
- .rigs{display:flex;flex-wrap:wrap;gap:14px}
- .card{background:#171a21;border:1px solid #262b36;border-radius:10px;padding:14px;width:380px}
- .hd{display:flex;align-items:center;gap:8px;margin-bottom:10px}
- .hd b{font-size:15px}
- .dot{width:12px;height:12px;border-radius:50%;background:#c0392b;flex:none}
- .dot.on{background:#27ae60}
- .muted{color:#8b93a2;font-size:12px}
+ *{box-sizing:border-box;scrollbar-width:none;-ms-overflow-style:none}
+ *::-webkit-scrollbar{width:0;height:0;display:none}
+ html,body{height:100%}
+ body{margin:0;font-family:system-ui,Arial,sans-serif;color:#c7d0dc;font-size:13px;
+      display:flex;flex-direction:column;background:#0d1320}
+ .mono{font-family:ui-monospace,Menlo,monospace}
+ header{position:relative;text-align:center;padding:12px;flex:none;
+        border-bottom:1px solid rgba(109,207,142,.16)}
+ header h1{margin:0;font-size:clamp(15px,2vw,21px);letter-spacing:5px;text-transform:uppercase;
+        font-weight:600;color:#eaf3ee}
+ header .sub{font-size:10px;letter-spacing:4px;color:#5f7480;margin-top:3px;
+        font-family:ui-monospace,monospace;text-transform:uppercase}
+ #clock{font-size:12px;color:#6f8590;margin-top:5px;font-family:ui-monospace,monospace}
+ main{flex:1;display:grid;min-height:0;gap:12px;padding:12px;
+      grid-template-columns:minmax(180px,215px) minmax(0,1fr);
+      grid-template-rows:minmax(0,1fr)}
+ /* connections keeps the styled panel */
+ .panel{position:relative;background:#151c29;border:1px solid rgba(140,160,180,.13);
+        border-radius:8px;padding:12px;overflow:auto}
+ .panel::before,.panel::after{content:"";position:absolute;width:11px;height:11px;
+        border:1px solid #6dcf8e;opacity:.55;pointer-events:none}
+ .panel::before{left:-1px;top:-1px;border-right:0;border-bottom:0}
+ .panel::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+ .ttl{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#6f8b84;
+      margin:0 0 10px;display:flex;align-items:center;gap:8px}
+ .ttl::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(109,207,142,.35),transparent)}
+ .muted{color:#7d8794;font-size:11px}
+ .conns{grid-column:1}
+ .addrow{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+ .prow{display:flex;align-items:center;gap:8px;padding:8px 4px;border-top:1px solid rgba(140,160,180,.08)}
+ .prow:first-of-type{border-top:0}
+ .dot{width:9px;height:9px;border-radius:50%;background:#e5675f;flex:none;display:inline-block;
+      box-shadow:0 0 8px rgba(229,103,95,.8)}
+ .dot.on{background:#6dcf8e;box-shadow:0 0 8px rgba(109,207,142,.8)}
+ /* plain, simple control area */
+ .control{grid-column:2;display:flex;flex-direction:column;padding:12px;overflow:auto}
+ .chead{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;font-size:14px}
+ .midrow{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap}
+ .params-col{flex:1 1 260px;min-width:0}
+ .hero{flex:0 0 180px;display:flex;flex-direction:column;justify-content:center;
+       text-align:center;border-left:1px solid rgba(140,160,180,.12);padding-left:16px}
+ .hero .rig{font-size:14px;color:#8b93a2;letter-spacing:1px}
+ .hero .w{font-size:clamp(24px,3vw,40px);font-weight:600;color:#e8eef4;line-height:1.15;margin-top:4px}
+ .hero .wl{font-size:12px;color:#8b93a2;margin-top:2px}
+ #ctllog{flex:1;min-height:60px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;
+      color:#8fa0ac;white-space:pre-wrap;background:#0b111b;border:1px solid rgba(140,160,180,.12);
+      border-radius:4px;padding:8px;margin-top:12px}
  table{width:100%;border-collapse:collapse;font-size:13px}
- th{text-align:left;color:#8b93a2;font-weight:normal;font-size:11px;padding:2px 4px}
- td{padding:3px 4px}
- td.cur{font-family:ui-monospace,monospace;color:#8fd3a0;text-align:right;width:70px}
- input{width:78px;background:#0f1115;color:#e6e6e6;border:1px solid #333;border-radius:5px;padding:3px}
- select{background:#0f1115;color:#e6e6e6;border:1px solid #333;border-radius:5px;padding:3px}
- button{background:#2d6cdf;color:#fff;border:0;border-radius:5px;padding:4px 9px;cursor:pointer}
- button.sec{background:#3a4150}
- button.x{background:transparent;color:#8b93a2;font-size:16px;padding:0 4px}
- .log{margin-top:8px;max-height:110px;overflow:auto;background:#0f1115;border:1px solid #262b36;
-      border-radius:6px;padding:6px;font-family:ui-monospace,monospace;font-size:11px;color:#9fb3c8;
-      white-space:pre-wrap}
- .row{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin:5px 0}
- .ctl{display:flex;gap:6px;align-items:center}
- #msg{position:fixed;top:10px;right:10px;padding:8px 12px;border-radius:6px;display:none}
- #msg.ok{background:#1e5631}#msg.err{background:#7a2020}
+ th{text-align:left;color:#8b93a2;font-weight:400;font-size:12px;padding:4px}
+ td{padding:4px}
+ td.cur{font-family:ui-monospace,monospace;color:#6dcf8e;text-align:right;width:76px}
+ input,select{background:#0b111b;color:#c7d0dc;border:1px solid rgba(140,160,180,.25);
+      border-radius:4px;padding:4px}
+ input{width:82px}
+ button{background:rgba(109,207,142,.12);color:#6dcf8e;border:1px solid rgba(109,207,142,.45);
+      border-radius:4px;padding:5px 11px;cursor:pointer;font-size:13px}
+ button:hover{background:rgba(109,207,142,.22);color:#8fe0aa}
+ button.x{background:transparent;border:0;color:#7d8794;font-size:15px;padding:0 4px}
+ button.x:hover{color:#e5675f}
+ .row{display:flex;justify-content:space-between;align-items:center;margin:8px 0}
+ .ctl{display:flex;gap:8px;align-items:center}
+ #msg{position:fixed;top:12px;right:12px;padding:8px 12px;border-radius:4px;display:none;
+      font-size:12px;border:1px solid}
+ #msg.ok{background:rgba(24,74,50,.94);border-color:#6dcf8e;color:#d6ffe6}
+ #msg.err{background:rgba(80,26,24,.94);border-color:#e5675f;color:#ffdcd9}
+ @media(max-width:820px){
+   main{grid-template-columns:1fr;grid-template-rows:auto auto}
+   .conns,.control{grid-column:1}.control{min-height:320px}
+   .hero{border-left:0;padding-left:0}
+ }
 </style></head><body>
-<h1>Hathaway control panel <span id="clock" class="muted"></span></h1>
-<p class="sub"> Add a tab and pick its COM port. </p>
-<div class="bar"><button id="addtab">+ Add rig tab</button></div>
-<div id="rigs" class="rigs"></div>
+<header>
+  <h1>Behavior Rigs Control Center</h1>
+  <div id="clock"></div>
+</header>
+<main>
+  <div class="panel conns">
+    <div class="ttl">Connections</div>
+    <div class="addrow"><select id="addsel"></select><button id="addbtn">Add</button></div>
+    <div class="muted" style="margin-bottom:6px">
+      <span class="dot on"></span> logging &nbsp; <span class="dot"></span> attempting</div>
+    <div id="portlist"></div>
+  </div>
+
+  <div class="control">
+    <div class="chead"><span>Rig <select id="rigsel"></select></span>
+      <span class="muted">COM:</span> <b id="ctlport" class="mono">&mdash;</b></div>
+    <div class="midrow">
+      <div class="params-col">
+        <div id="ctl" style="display:none">
+          <div style="margin-bottom:8px"><button id="fetchbtn">Fetch</button></div>
+          <table><tr><th>parameter</th><th style="text-align:right">current</th>
+            <th>new</th><th></th></tr><tbody id="ctlparams"></tbody></table>
+        </div>
+        <div id="ctlnone" class="muted">Select a running rig to control it.</div>
+      </div>
+      <div class="hero">
+        <div class="rig" id="heroRig">&mdash;</div>
+        <div class="w" id="ctlweight">&mdash;</div>
+        <div class="wl">weight</div>
+        <div style="margin-top:10px"><button id="tarebtn">Tare</button></div>
+      </div>
+    </div>
+    <div id="ctllog"></div>
+  </div>
+</main>
+
 <div id="msg"></div>
 <script>
 function flash(ok,text){const m=document.getElementById('msg');m.textContent=text;
   m.className=ok?'ok':'err';m.style.display='block';setTimeout(function(){m.style.display='none';},2500);}
-async function send(rig,name,inp){
-  const v=parseFloat(inp.value);
+async function post(url,body){const o={method:'POST'};
+  if(body){o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(body);}
+  const r=await fetch(url,o);const j=await r.json();flash(j.ok,j.msg);return j;}
+function addPort(){const p=document.getElementById('addsel').value;
+  if(!p){flash(false,'pick a port to add');return;}post('/api/open',{port:p});}
+function closePort(p){post('/api/close',{port:p});}
+function fetchRig(rig){post('/api/rig/'+rig+'/dump');}
+function tareRig(rig){post('/api/rig/'+rig+'/tare');}
+async function send(rig,name,inp){const v=parseFloat(inp.value);
   if(isNaN(v)){flash(false,'enter a number first');return;}
-  const r=await fetch('/api/rig/'+rig+'/set',{method:'POST',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,value:v})});
-  const j=await r.json();flash(j.ok,j.msg);if(j.ok)inp.value='';}
-async function openPort(port){
-  const r=await fetch('/api/open',{method:'POST',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({port:port})});
-  const j=await r.json();flash(j.ok,j.msg);}
-async function tareRig(rig){
-  const r=await fetch('/api/rig/'+rig+'/tare',{method:'POST'});
-  const j=await r.json();flash(j.ok,j.msg);}
+  const j=await post('/api/rig/'+rig+'/set',{name:name,value:v});if(j.ok)inp.value='';}
 
-let TABS=[];            // [{id, port}]
-let nextId=1, inited=false;
-const els={};           // tabId -> {el, rows, sel}
-function addTab(port){TABS.push({id:nextId, port:port||""});return nextId++;}
-function removeTab(id){TABS=TABS.filter(function(t){return t.id!==id;});
-  if(els[id]){els[id].el.remove();delete els[id];}}
-
-function buildTab(tab){
-  const el=document.createElement('div');el.className='card';
-  el.innerHTML=
-    '<div class="hd"><span class="dot" data-dot></span><b data-label>Rig &mdash;</b>'
-    +'<span style="flex:1"></span><button class="x" data-close title="remove tab">&times;</button></div>'
-    +'<div class="row"><span class="muted">COM port</span>'
-    +'<span class="ctl"><select data-sel></select>'
-    +'<button data-refresh>Fetch values from rig</button></span></div>'
-    +'<div class="row"><span class="muted">weight</span>'
-    +'<span class="ctl"><span data-weight>&mdash;</span>'
-    +'<button data-tare>Tare scale</button></span></div>'
-    +'<table><tr><th>parameter</th><th style="text-align:right">current</th>'
-    +'<th>new</th><th></th></tr><tbody data-params></tbody></table>'
-    +'<div class="log" data-log></div>';
-  const rec={el:el,rows:{},sel:el.querySelector('[data-sel]'),rigId:null};
-  rec.sel.onchange=function(){tab.port=rec.sel.value;if(tab.port)openPort(tab.port);};
-  el.querySelector('[data-refresh]').onclick=function(){if(tab.port)openPort(tab.port);
-    else flash(false,'pick a COM port first');};
-  el.querySelector('[data-tare]').onclick=function(){
-    if(rec.rigId!=null)tareRig(rec.rigId);else flash(false,'no rig on this port yet');};
-  el.querySelector('[data-close]').onclick=function(){removeTab(tab.id);};
-  document.getElementById('rigs').appendChild(el);
-  els[tab.id]=rec;
-  return rec;
-}
-function setOptions(sel,ports,selected){
-  const key=ports.join(',');
+function setOptions(sel,opts,selected){
+  const key=opts.join(',');
   if(sel.dataset.opts!==key){
     sel.innerHTML='<option value="">&mdash; select &mdash;</option>'
-      +ports.map(function(p){return '<option>'+p+'</option>';}).join('');
+      +opts.map(function(o){return '<option>'+o+'</option>';}).join('');
     sel.dataset.opts=key;
   }
   if(document.activeElement!==sel && sel.value!==(selected||''))sel.value=selected||'';
 }
-function ensureRow(rec,rig,name){
-  if(rec.rows[name])return;
+
+// ---- Connections sector: add / remove / status of every port ----
+function renderConnections(state){
+  const ports=state.ports||{};
+  const open=Object.keys(ports).sort();
+  const avail=(state.available_ports||[]).filter(function(p){return open.indexOf(p)<0;});
+  setOptions(document.getElementById('addsel'),avail,'');
+  const box=document.getElementById('portlist');
+  box.innerHTML=open.length?open.map(function(p){
+    const info=ports[p], on=info.responding;
+    const rig=(info.rig_id!=null)?('Rig '+info.rig_id):'Rig ?';
+    const title=on?'logging to database':(info.err||'attempting to connect');
+    return '<div class="prow"><span class="dot'+(on?' on':'')+'" title="'+title+'"></span>'
+      +'<b style="width:64px">'+rig+'</b><span class="muted" style="width:96px">'+p+'</span>'
+      +'<span style="flex:1"></span><button class="x" data-close="'+p+'" title="remove">&times;</button></div>';
+  }).join(''):'<div class="muted">No ports open. Add one above.</div>';
+  box.querySelectorAll('[data-close]').forEach(function(b){
+    b.onclick=function(){closePort(b.getAttribute('data-close'));};});
+}
+
+// ---- Control sector: one rig at a time, selected by Rig ID ----
+let selectedRig="", ctlRows={}, ctlRigForRows=null, lastState=null;
+function ensureCtlRow(rig,name){
+  if(ctlRows[name])return;
   const tr=document.createElement('tr');
   tr.innerHTML='<td>'+name+'</td><td class="cur" data-cur>&mdash;</td>'
     +'<td><input placeholder="value"></td><td><button>Set</button></td>';
   const inp=tr.querySelector('input');
   tr.querySelector('button').onclick=function(){send(rig,name,inp);};
-  rec.el.querySelector('[data-params]').appendChild(tr);
-  rec.rows[name]=tr;
+  document.getElementById('ctlparams').appendChild(tr);
+  ctlRows[name]=tr;
 }
+function renderControl(state){
+  const ports=state.ports||{};
+  const rigPort={};                         // rig_id -> COM port (running ports only)
+  Object.keys(ports).forEach(function(p){const r=ports[p].rig_id;if(r!=null)rigPort[r]=p;});
+  const rigIds=Object.keys(rigPort).map(Number).sort(function(a,b){return a-b;});
+  setOptions(document.getElementById('rigsel'),rigIds.map(String),selectedRig);
+  selectedRig=document.getElementById('rigsel').value;
+  const has=selectedRig!=="" && rigIds.indexOf(Number(selectedRig))>=0;
+  document.getElementById('ctl').style.display=has?'block':'none';
+  document.getElementById('ctlnone').style.display=has?'none':'block';
+  const hero=document.getElementById('heroRig'), w=document.getElementById('ctlweight'),
+        cp=document.getElementById('ctlport'), lg=document.getElementById('ctllog');
+  if(!has){cp.innerHTML='&mdash;';hero.innerHTML='&mdash;';w.innerHTML='&mdash;';lg.textContent='';return;}
+  const rig=Number(selectedRig);
+  cp.textContent=rigPort[rig];
+  hero.textContent='RIG '+rig;
+  if(ctlRigForRows!==rig){        // switched rigs: rebuild the parameter rows
+    document.getElementById('ctlparams').innerHTML='';ctlRows={};ctlRigForRows=rig;}
+  const r=state.rigs[rig]||{};
+  w.textContent=(r.weight!=null)?(r.weight+' g'):'\\u2014';
+  const params=r.params||{};
+  Object.keys(params).forEach(function(name){
+    ensureCtlRow(rig,name);
+    ctlRows[name].querySelector('[data-cur]').textContent=params[name];});
+  lg.textContent=(r.log||[]).slice(-20).reverse().join('\\n')||'(no messages)';
+}
+
 function update(state){
+  lastState=state;
   document.getElementById('clock').textContent=new Date().toLocaleTimeString();
-  if(!inited){inited=true;                        // first load: one tab per open port
-    const open=Object.keys(state.ports||{});
-    if(open.length)open.forEach(function(p){addTab(p);});else addTab("");}
-  const avail=state.available_ports||[];
-  TABS.forEach(function(tab){
-    const rec=els[tab.id]||buildTab(tab);
-    setOptions(rec.sel,avail,tab.port);
-    const pinfo=(tab.port&&state.ports[tab.port])?state.ports[tab.port]:null;
-    const responding=pinfo?pinfo.responding:false;
-    const rigId=pinfo?pinfo.rig_id:null;
-    rec.rigId=rigId;                     // so the Tare button knows the target rig
-    const dot=rec.el.querySelector('[data-dot]');
-    dot.className='dot'+(responding?' on':'');
-    dot.title=responding?'responding':(pinfo?(pinfo.err||'no response'):'no port selected');
-    rec.el.querySelector('[data-label]').innerHTML=
-      (rigId!=null)?('Rig '+rigId):(tab.port?'Rig ? (waiting)':'Rig &mdash;');
-    const r=(rigId!=null&&state.rigs[rigId])?state.rigs[rigId]:null;
-    rec.el.querySelector('[data-weight]').textContent=
-      (r&&r.weight!=null)?(r.weight+' g'):'\\u2014';
-    const params=r?(r.params||{}):{};
-    Object.keys(params).forEach(function(name){
-      ensureRow(rec,rigId,name);
-      rec.rows[name].querySelector('[data-cur]').textContent=params[name];
-    });
-    rec.el.querySelector('[data-log]').textContent=
-      r?((r.log||[]).slice(-12).reverse().join('\\n')||'(no messages)'):'';
-  });
+  renderConnections(state);
+  renderControl(state);
 }
-document.getElementById('addtab').onclick=function(){addTab("");tick();};
+document.getElementById('addbtn').onclick=addPort;
+document.getElementById('rigsel').onchange=function(){selectedRig=this.value;
+  if(lastState)renderControl(lastState);};
+document.getElementById('tarebtn').onclick=function(){if(selectedRig)tareRig(Number(selectedRig));};
+document.getElementById('fetchbtn').onclick=function(){if(selectedRig)fetchRig(Number(selectedRig));};
 async function tick(){try{const r=await fetch('/api/state');update(await r.json());}catch(e){}}
 setInterval(tick,1000);tick();
 </script></body></html>"""
