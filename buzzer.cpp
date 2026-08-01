@@ -30,6 +30,14 @@ void BuzzerHandler::playNote(uint32_t freq, unsigned long duration) {
     closeTime = millis() + noteDuration;
 }
 
+void BuzzerHandler::stop() {
+    if (buzzerPin < 0) {
+        return;
+    }
+    ledcWrite(buzzerPin, 0);
+    isPlaying = false;
+}
+
 bool BuzzerHandler::update() {
     if (buzzerPin < 0) {
         return false;

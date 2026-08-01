@@ -1,3 +1,8 @@
-
 .DS_Store
 *.pyc
+__pycache__/
+
+# Database backups. These get large -- the one made on 2026-07-31 was 69 MB
+# compressed and 825 MB as plain SQL -- and must never end up in a commit.
+*.dump
+backup*.sql

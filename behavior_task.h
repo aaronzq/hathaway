@@ -37,3 +37,24 @@ unsigned long REWARD_INTERVAL2 = 3000;  // refractory after a spout-2 reward, ms
 unsigned long MAG_FIX_DURATION = 5000;
 float SCALE_HIGH_THRESH = 40.0;
 float SCALE_LOW_THRESH  = 10.0;
+
+// --- task selection --------------------------------------------------------
+// Which state machine is running. See TASK_TABLE in tasks.cpp:
+//   1 = LICK_REWARD  free licking, either spout, shared refractory gate
+//   2 = CUED_REWARD  first lick -> go cue -> water -> gate -> next trial
+// The switch is DEFERRED until the running task reaches a trial boundary, so
+// setting this mid-trial is safe. The TASK telemetry line marks the cycle on
+// which it actually took effect.
+unsigned long TASK = 1;
+
+// Per-spout manual cut-off, for temporarily taking a spout out of use without
+// reflashing. A disabled spout still reports its licks -- it just cannot earn
+// water, and its licks do not touch the reward gate.
+unsigned long SPOUT1_ENABLE = 1;
+unsigned long SPOUT2_ENABLE = 1;
+
+// --- task 2 ----------------------------------------------------------------
+unsigned long T2_CUE_FREQ     = 6000;   // go cue frequency, Hz
+unsigned long T2_CUE_DUR      = 100;    // go cue duration, ms
+unsigned long T2_CUE_TO_WATER = 100;    // cue ONSET -> water, ms (100 = at cue
+                                        // offset; 0 = at cue onset)

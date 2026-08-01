@@ -32,7 +32,10 @@ void Rewarder::update()
 {
     if (isOpen) {
         unsigned long now = millis();
-        if (now <= closeTime) {
+        // Signed difference, not "now <= closeTime": millis() wraps every 49.7
+        // days, and a plain compare closes the valve on the first update after
+        // the wrap instead of after `duration`.
+        if ((long)(now - closeTime) < 0) {
             digitalWrite(rewardPin, HIGH);
         } else {
             digitalWrite(rewardPin, LOW);

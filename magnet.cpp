@@ -27,7 +27,9 @@ bool Magneto::update()
 {
     if (isOn) {
         unsigned long now = millis();
-        if (now <= closeTime) {
+        // Signed difference: see the note in async_reward.cpp. A plain compare
+        // releases the magnet early on the first update after the millis() wrap.
+        if ((long)(now - closeTime) < 0) {
             digitalWrite(magnetPin, HIGH);
         } else {
             digitalWrite(magnetPin, LOW);

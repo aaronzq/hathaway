@@ -165,8 +165,13 @@ inline int protoFormat(char *line, size_t cap, int rigId,
   int    m = 0;
 
   if (r.type == TELEM_INTERNAL_PARAM) {
+    // Carries device_ms like every data line does. Without it the host has no
+    // idea *when* a parameter took effect, so it cannot say which settings were
+    // in force for a given trial. The record already held the timestamp; it just
+    // was not being rendered.
     const char *n = (r.channel < ctN) ? ct[r.channel].name : "?";
-    m = snprintf(b, c, "PARAM:%s,%g\n", n, (double)r.value);
+    m = snprintf(b, c, "PARAM:%s,%g,%lu\n", n, (double)r.value,
+                 (unsigned long)r.dev_ms);
   } else if (r.type == TELEM_INTERNAL_ACK) {
     const char *n = (r.channel < ctN) ? ct[r.channel].name : "?";
     m = snprintf(b, c, "#%s ok\n", n);

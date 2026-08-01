@@ -159,6 +159,9 @@ class SerialLink:
 # Controller: demux by rig id, keep state, feed the DB, route commands
 # --------------------------------------------------------------------------- #
 class Controller:
+    # Queue marker: "this rig announced its schema, so it may have restarted".
+    BOOT_HINT = "#boot-hint"
+
     def __init__(self, db, note="", baud=115200):
         self.db = db
         self.note = note
@@ -172,6 +175,9 @@ class Controller:
         self.recq = queue.Queue()      # (rig_id, [records], host_ts)
         self.sessions = {}             # rig_id -> session_id
         self.seq = defaultdict(int)    # rig_id -> running seq
+        # One device clock per rig: each board has its own millis() origin, its
+        # own reboots and its own wrap. See DeviceClock in ingest.py.
+        self.clocks = defaultdict(ingest.DeviceClock)
         self.lock = threading.Lock()
         self._stop = threading.Event()
         self._db_thread = threading.Thread(target=self._db_worker,
@@ -222,6 +228,19 @@ class Controller:
         self._stop.set()
         for link in self.link_by_port.values():
             link.stop()
+        # The DB thread has stopped, so drain the clocks here: each one may still
+        # be holding a warm-up buffer, and those records are real data.
+        self._db_thread.join(timeout=2.0)
+        samples, events = [], []
+        for rig_id, clock in self.clocks.items():
+            for (kind, row), epoch_us in clock.close():
+                row = row[:3] + (epoch_us,) + row[4:]
+                (samples if kind == "S" else events).append(row)
+        if samples or events:
+            try:
+                self.db.write(samples, events)
+            except Exception as e:
+                print("[db] final write error:", e)
         try:
             self.db.close()
         except Exception:
@@ -270,12 +289,23 @@ class Controller:
         # Comments (#DEF, #ERR, #...) -> learn the schema, then show in the log.
         if rest.startswith("#"):
             ingest.parse_schema_line(rest)   # "#DEF <NAME>,<S|E>"
+            if rest.startswith("#DEF"):
+                # setup() dumps the schema, so this may be a restart -- but our
+                # own DUMP looks identical, so only arm the detector. See
+                # DeviceClock.arm_boot(). Sent through the queue rather than
+                # touched directly: the clock belongs to the DB thread, and this
+                # keeps it seeing everything in arrival order.
+                self.recq.put((rig_id, self.BOOT_HINT, *self._stamps()))
             st.log.append(rest)
             return
 
         # Parameter affirmations -> update state and log to the DB.
         if rest.startswith("PARAM:"):
-            name, _, val = rest[len("PARAM:"):].partition(",")
+            # "PARAM:<name>,<value>,<device_ms>". The timestamp is what lets a
+            # query say which settings were in force for a given trial. Firmware
+            # older than that change sends only two fields, so it stays optional.
+            name, _, tail = rest[len("PARAM:"):].partition(",")
+            val, _, dev_ms = tail.partition(",")
             try:
                 v = float(val)
             except ValueError:
@@ -283,9 +313,13 @@ class Controller:
             st.params[name] = v
             st.log.append(rest)
             if isinstance(v, float):
+                try:
+                    t_us = int(dev_ms) * 1000
+                except ValueError:
+                    t_us = 0            # old firmware: no timestamp on the line
                 self.recq.put((rig_id, [{"kind": "E", "type": "PARAM_" + name,
-                                         "channel": 0, "value": v, "t_us": 0}],
-                               self._host_ts()))
+                                         "channel": 0, "value": v, "t_us": t_us}],
+                               *self._stamps()))
             return
 
         # Normal telemetry -> parse with the existing ingest parser.
@@ -298,11 +332,17 @@ class Controller:
             if r["kind"] == "E":
                 ch = r["channel"] or ""
                 st.counts[f'{r["type"]}{ch}'] += 1
-        self.recq.put((rig_id, recs, self._host_ts()))
+        self.recq.put((rig_id, recs, *self._stamps()))
 
     @staticmethod
     def _host_ts():
         return dt.datetime.now(dt.timezone.utc).isoformat()
+
+    @staticmethod
+    def _stamps():
+        """(iso string, epoch microseconds) for the same instant of arrival."""
+        now = dt.datetime.now(dt.timezone.utc)
+        return now.isoformat(), ingest.DeviceClock.host_us(now)
 
     # -- DB writer thread ------------------------------------------------- #
     def _session(self, rig_id):
@@ -315,16 +355,36 @@ class Controller:
     def _db_worker(self):
         samples, events = [], []
         last = time.monotonic()
+
+        def collect(stamped):
+            """Route stamped rows by the kind that travels with each one."""
+            for (kind, row), epoch_us in stamped:
+                row = row[:3] + (epoch_us,) + row[4:]
+                (samples if kind == "S" else events).append(row)
+
         while not self._stop.is_set():
             try:
-                rig_id, recs, host_ts = self.recq.get(timeout=0.5)
+                rig_id, recs, host_ts, host_us = self.recq.get(timeout=0.5)
+                clock = self.clocks[rig_id]
+
+                if recs is self.BOOT_HINT:
+                    clock.arm_boot()
+                    continue
+
                 sid = self._session(rig_id)
+                if any(r["type"] == "BOOT" for r in recs):
+                    collect(clock.announce_boot())   # explicit, no corroboration
+
                 for r in recs:
                     self.seq[rig_id] += 1
-                    t_us = r.get("t_us") or 0
-                    row = (sid, rig_id, self.seq[rig_id], t_us, host_ts,
-                           r["type"], r["channel"], r["value"])
-                    (samples if r["kind"] == "S" else events).append(row)
+                    item = (r["kind"],
+                            (sid, rig_id, self.seq[rig_id], None, host_ts,
+                             r["type"], r["channel"], r["value"]))
+                    t_us = r.get("t_us")
+                    if not t_us:
+                        collect([(item, 0)])   # no device time on this line
+                    else:
+                        collect(clock.stamp(item, t_us // 1000, host_us))
             except queue.Empty:
                 pass
             if (len(samples) + len(events) >= 200

@@ -1,7 +1,9 @@
 {
   "uid": "hathaway-live-rig-monitor",
   "title": "Hathaway - Live Rig Monitor",
-  "tags": ["hathaway"],
+  "tags": [
+    "hathaway"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 101,
@@ -13,23 +15,67 @@
     "to": "now"
   },
   "timepicker": {
-    "refresh_intervals": ["500ms", "1s", "2s", "5s", "10s", "30s", "1m", "5m"],
+    "refresh_intervals": [
+      "500ms",
+      "1s",
+      "2s",
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ],
     "quick_ranges": [
-      { "display": "Last 30 seconds", "from": "now-30s", "to": "now" },
-      { "display": "Last 1 minute", "from": "now-1m", "to": "now" },
-      { "display": "Last 2 minutes", "from": "now-2m", "to": "now" },
-      { "display": "Last 5 minutes", "from": "now-5m", "to": "now" },
-      { "display": "Last 15 minutes", "from": "now-15m", "to": "now" },
-      { "display": "Last 1 hour", "from": "now-1h", "to": "now" },
-      { "display": "Last 3 hour", "from": "now-3h", "to": "now" },
-      { "display": "Last 6 hour", "from": "now-6h", "to": "now" }
+      {
+        "display": "Last 30 seconds",
+        "from": "now-30s",
+        "to": "now"
+      },
+      {
+        "display": "Last 1 minute",
+        "from": "now-1m",
+        "to": "now"
+      },
+      {
+        "display": "Last 2 minutes",
+        "from": "now-2m",
+        "to": "now"
+      },
+      {
+        "display": "Last 5 minutes",
+        "from": "now-5m",
+        "to": "now"
+      },
+      {
+        "display": "Last 15 minutes",
+        "from": "now-15m",
+        "to": "now"
+      },
+      {
+        "display": "Last 1 hour",
+        "from": "now-1h",
+        "to": "now"
+      },
+      {
+        "display": "Last 3 hour",
+        "from": "now-3h",
+        "to": "now"
+      },
+      {
+        "display": "Last 6 hour",
+        "from": "now-6h",
+        "to": "now"
+      }
     ]
   },
   "annotations": {
     "list": [
       {
         "builtIn": 1,
-        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -38,28 +84,43 @@
       }
     ]
   },
-  "templating": { "list": [] },
+  "templating": {
+    "list": []
+  },
   "links": [],
   "panels": [
     {
       "id": 1,
-      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 6 },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 6
+      },
       "type": "timeseries",
       "title": "Weight scale",
       "description": "",
-      "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "hathaway_pg"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT host_ts AS time, value AS weight FROM samples WHERE type = 'WEIGHT' AND $__timeFilter(host_ts) ORDER BY host_ts"
+          "rawSql": "SELECT dev_ts AS time, value AS weight FROM samples_dev WHERE type = 'WEIGHT' AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -71,23 +132,40 @@
             "drawStyle": "line",
             "fillOpacity": 8,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "never",
             "showValues": false,
             "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "red", "value": 80 }
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
             ]
           },
           "unit": "none"
@@ -101,49 +179,74 @@
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "single", "sort": "none" }
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       }
     },
     {
       "id": 4,
-      "gridPos": { "x": 0, "y": 6, "w": 24, "h": 6 },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 6
+      },
       "type": "timeseries",
       "title": "Lick & Reward events",
       "description": "",
-      "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+      "datasource": {
+        "type": "postgres",
+        "uid": "hathaway_pg"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT host_ts AS time, 1 AS lick1 FROM events WHERE type = 'LICK' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY host_ts"
+          "rawSql": "SELECT dev_ts AS time, 1 AS lick1 FROM events_dev WHERE type = 'LICK' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "B",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT host_ts AS time, 3 AS lick2 FROM events WHERE type = 'LICK' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY host_ts"
+          "rawSql": "SELECT dev_ts AS time, 3 AS lick2 FROM events_dev WHERE type = 'LICK' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "C",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT host_ts AS time, 1.5 AS reward1 FROM events WHERE type = 'REWARD' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY host_ts"
+          "rawSql": "SELECT dev_ts AS time, 1.5 AS reward1 FROM events_dev WHERE type = 'REWARD' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "D",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT host_ts AS time, 3.5 AS reward2 FROM events WHERE type = 'REWARD' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY host_ts"
+          "rawSql": "SELECT dev_ts AS time, 3.5 AS reward2 FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -155,25 +258,42 @@
             "drawStyle": "points",
             "fillOpacity": 0,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 0,
             "pointSize": 6,
-            "scaleDistribution": { "type": "linear" },
+            "scaleDistribution": {
+              "type": "linear"
+            },
             "showPoints": "always",
             "showValues": false,
             "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "max": 4.5,
           "min": 0.5,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "red", "value": 80 }
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
             ]
           }
         },
@@ -186,154 +306,66 @@
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "multi", "sort": "none" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
       }
     },
     {
       "id": 2,
-      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 5 },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 5
+      },
       "type": "timeseries",
-      "title": "Mouse position and Magnet state",
-      "description": "",
-      "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+      "title": "Mouse position, Magnet and Buzzer state",
+      "description": "Three 0/1 state traces, offset into separate bands so they never overlap: POSITION 0-1, MAGNET 1.5-2.5, BUZZER 3-4. The offsets are applied in SQL; the stored values are all 0/1 (and for TONE, the frequency in Hz).",
+      "datasource": {
+        "type": "postgres",
+        "uid": "hathaway_pg"
+      },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "(SELECT $__timeFrom()::timestamptz AS time, value AS position FROM samples WHERE type = 'POSITION' AND host_ts < $__timeFrom() ORDER BY host_ts DESC LIMIT 1) UNION ALL (SELECT host_ts AS time, value AS position FROM samples WHERE type = 'POSITION' AND $__timeFilter(host_ts)) ORDER BY time"
+          "rawSql": "-- Keeps the 0..1 band; MAGNET and BUZZER are offset above it.\r\n(SELECT $__timeFrom()::timestamptz AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND host_ts < $__timeFrom() ORDER BY t_us DESC LIMIT 1) UNION ALL (SELECT dev_ts AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND $__timeFilter(host_ts)) ORDER BY time"
         },
         {
           "refId": "B",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
-          "format": "time_series",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "(SELECT $__timeFrom()::timestamptz AS time, value AS magnet\r\n   FROM samples\r\n  WHERE type = 'MAGNET' AND host_ts < $__timeFrom()\r\n  ORDER BY host_ts DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT host_ts AS time, value AS magnet\r\n   FROM samples\r\n  WHERE type = 'MAGNET' AND $__timeFilter(host_ts))\r\nORDER BY time"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
-            "insertNulls": false,
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
-            "showPoints": "never",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
           },
-          "max": 1.1,
-          "min": -0.1,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "red", "value": 80 }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        },
-        "tooltip": { "mode": "single", "sort": "none" }
-      }
-    },
-    {
-      "id": 3,
-      "gridPos": { "x": 0, "y": 17, "w": 7, "h": 7 },
-      "type": "gauge",
-      "title": "Cumulative rewards (Total)",
-      "description": "",
-      "datasource": { "type": "postgres", "uid": "hathaway_pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
-          "format": "table",
+          "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1, count(*) FILTER (WHERE channel = 2) AS reward2 FROM events WHERE type = 'REWARD' AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles'"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": { "fixedColor": "green", "mode": "fixed" },
-          "max": 800,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": 0 },
-              { "color": "green", "value": 600 }
-            ]
+          "rawSql": "-- Offset into the 1.5..2.5 band. Stored values are still 0/1.\r\n(SELECT $__timeFrom()::timestamptz AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND host_ts < $__timeFrom()\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND $__timeFilter(host_ts))\r\nORDER BY time"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
           },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true,
-        "sizing": "auto"
-      }
-    },
-    {
-      "id": 5,
-      "gridPos": { "x": 7, "y": 17, "w": 17, "h": 7 },
-      "type": "timeseries",
-      "title": "Cumulative rewards",
-      "description": "",
-      "datasource": { "type": "postgres", "uid": "hathaway_pg" },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ts AS time, reward_index AS reward1 FROM (SELECT host_ts AS ts, count(*) OVER (ORDER BY host_ts) AS reward_index FROM events WHERE type = 'REWARD' AND channel = 1 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
-        },
-        {
-          "refId": "B",
-          "datasource": { "type": "postgres", "uid": "hathaway_pg" },
-          "format": "time_series",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT ts AS time, reward_index AS reward2 FROM (SELECT host_ts AS ts, count(*) OVER (ORDER BY host_ts) AS reward_index FROM events WHERE type = 'REWARD' AND channel = 2 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
+          "rawSql": "-- Offset into the 3..4 band: 4 while a note sounds, 3 when silent.\r\n-- (TONE stores the frequency in Hz, so 'sounding' is value > 0.)\r\n--\r\n-- The first branch is the carry-in, same as POSITION and MAGNET above: it\r\n-- looks just before the window, takes the last known state and draws it at\r\n-- the left edge, so the line starts there instead of at the first row inside\r\n-- the window. Bounded to 10 minutes -- unbounded it would reach back days into\r\n-- an earlier session and paint a flat 'silent' line across a window that has\r\n-- no tone data at all.\r\n--\r\n-- Filters are on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks. dev_ts is computed per row, so\r\n-- filtering on it means scanning every chunk on every refresh. dev_ts is still\r\n-- what gets PLOTTED; only the row selection uses host_ts, and the two never\r\n-- differ by more than the serial read cycle.\r\n(SELECT $__timeFrom()::timestamptz AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE'\r\n    AND host_ts <  $__timeFrom()::timestamptz\r\n    AND host_ts >= $__timeFrom()::timestamptz - interval '10 minutes'\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE' AND $__timeFilter(host_ts))\r\nORDER BY time"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisBorderShow": false,
             "axisCenteredZero": false,
@@ -345,23 +377,42 @@
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
             "pointSize": 5,
-            "scaleDistribution": { "type": "linear" },
-            "showPoints": "auto",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
             "showValues": false,
             "spanNulls": false,
-            "stacking": { "group": "A", "mode": "none" },
-            "thresholdsStyle": { "mode": "off" }
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
+          "max": 4.1,
+          "min": -0.1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": 0 },
-              { "color": "red", "value": 80 }
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
             ]
           }
         },
@@ -374,7 +425,184 @@
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "single", "sort": "none" }
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 7,
+        "h": 7
+      },
+      "type": "gauge",
+      "title": "Cumulative rewards (Total)",
+      "description": "",
+      "datasource": {
+        "type": "postgres",
+        "uid": "hathaway_pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1, count(*) FILTER (WHERE channel = 2) AS reward2 FROM events_dev WHERE type = 'REWARD' AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "max": 800,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 600
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      }
+    },
+    {
+      "id": 5,
+      "gridPos": {
+        "x": 7,
+        "y": 17,
+        "w": 17,
+        "h": 7
+      },
+      "type": "timeseries",
+      "title": "Cumulative rewards",
+      "description": "",
+      "datasource": {
+        "type": "postgres",
+        "uid": "hathaway_pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, reward_index AS reward1 FROM (SELECT dev_ts AS ts, count(*) OVER (ORDER BY t_us) AS reward_index FROM events_dev WHERE type = 'REWARD' AND channel = 1 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS time, reward_index AS reward2 FROM (SELECT dev_ts AS ts, count(*) OVER (ORDER BY t_us) AS reward_index FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
       }
     }
   ]
