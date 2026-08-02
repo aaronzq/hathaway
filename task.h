@@ -52,8 +52,14 @@ enum : uint32_t {
 enum : uint32_t {
   LV_IN_POSITION = 1u << 0,
   LV_TONE_ON     = 1u << 1,
-  LV_SPOUT1_EN   = 1u << 2,   // SPOUT1_ENABLE parameter
-  LV_SPOUT2_EN   = 1u << 3,   // SPOUT2_ENABLE parameter
+  // T1_SPOUTn_ENABLE, and task 1's alone -- the name says so on the wire. They
+  // are a lick filter: a lick on a switched-off spout is logged by the sketch
+  // and then is not a lick as far as task 1 is concerned. Task 2 does not read
+  // them; it takes a spout out of use by setting that spout's block length to
+  // zero instead. A new task should pick one convention deliberately rather
+  // than inherit these by accident.
+  LV_SPOUT1_EN   = 1u << 2,
+  LV_SPOUT2_EN   = 1u << 3,
 };
 
 
@@ -132,7 +138,10 @@ public:
 
   // ---- driven by the sketch -------------------------------------------
   void step(const Inputs &in, ActionQueue &out);
-  void reset(uint32_t now);     // safe (re)entry; call once on task switch
+  // Safe (re)entry; call once on task switch. Virtual only so that a task
+  // carrying state ACROSS trials (a block counter, say) can clear it too -- an
+  // override must call Task::reset() first.
+  virtual void reset(uint32_t now);
 
   // ---- how the task describes itself to the host ----------------------
   virtual const char *name() const = 0;

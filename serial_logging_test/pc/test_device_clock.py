@@ -402,6 +402,65 @@ def test_control_panel():
           "t_us holds epoch microseconds, not device uptime")
 
 
+def test_session_increments_on_remove_and_add():
+    print("sessions: a new one starts only on an explicit port removal")
+    import control_panel
+
+    class SessionDB(ingest.BaseDB):
+        def __init__(self): self.next = 1; self.started = []; self.rows = []
+        def start_session(self, rig_id, note):
+            sid = self.next; self.next += 1
+            self.started.append((sid, rig_id)); return sid
+        def write(self, samples, events): self.rows += list(samples) + list(events)
+        def close(self): pass
+
+    class FakeLink:                     # close_port() only needs .stop()
+        def stop(self): pass
+
+    db = SessionDB()
+    c = control_panel.Controller(db)
+    c.start()
+
+    def traffic(dev_ms):
+        c.on_line("COM_TEST", f"1|LICK:2,1,{dev_ms}")
+        time.sleep(0.05)
+
+    # ---- session 1 -------------------------------------------------------
+    c.link_by_port["COM_TEST"] = FakeLink()
+    traffic(1000); traffic(1100)
+    time.sleep(0.7)
+    check(db.next - 1 == 1, f"one session so far (got {db.next - 1})")
+
+    # a dropped cable: SerialLink reconnects by itself, no session change
+    c.on_line("COM_TEST", "1|#DEF LICK,E")     # the rig re-announces on reconnect
+    traffic(1200)
+    time.sleep(0.7)
+    check(db.next - 1 == 1, f"a reconnect does NOT start one (got {db.next - 1})")
+
+    # ---- operator clicks the x, then Add ---------------------------------
+    c.close_port("COM_TEST")
+    time.sleep(0.7)
+    c.link_by_port["COM_TEST"] = FakeLink()
+    traffic(1300); traffic(1400)
+    time.sleep(0.7)
+    check(db.next - 1 == 2, f"remove + add starts session 2 (got {db.next - 1})")
+
+    # ---- and again -------------------------------------------------------
+    c.close_port("COM_TEST")
+    time.sleep(0.7)
+    c.link_by_port["COM_TEST"] = FakeLink()
+    traffic(1500)
+    time.sleep(0.7)
+    c.shutdown(); time.sleep(0.3)
+    check(db.next - 1 == 3, f"and again for session 3 (got {db.next - 1})")
+
+    sids = sorted({r[0] for r in db.rows})
+    check(sids == [1, 2, 3], f"rows carry all three session ids (got {sids})")
+    # Records queued before the click must stay with the session they arrived in.
+    check(all(s == 1 for s in [r[0] for r in db.rows][:3]),
+          "records from before the removal stayed in the old session")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pg", action="store_true", help="also test against real PostgreSQL")
@@ -415,6 +474,7 @@ def main():
     test_long_gap_is_not_a_reboot()
     test_nothing_is_lost_on_reboot_during_warmup()
     test_control_panel()
+    test_session_increments_on_remove_and_add()
     if args.pg:
         test_postgres()
 

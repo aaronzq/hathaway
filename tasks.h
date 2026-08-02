@@ -26,7 +26,7 @@
 //  interval used is that of the spout that just rewarded. This reproduces the
 //  behaviour of the pre-state-machine firmware exactly.
 //
-//  A spout disabled with "SET SPOUT2_ENABLE 0" still has its licks detected and
+//  A spout disabled with "SET T1_SPOUT2_ENABLE 0" still has its licks detected and
 //  logged -- it just cannot earn water, and its licks do not touch the gate.
 //
 //      ARMED  --lick on an enabled spout--> REFRACTORY  (deliver that spout)
@@ -56,27 +56,45 @@ private:
 
 
 // ===========================================================================
-//  TASK 2 -- cued reward, one reward per trial
+//  TASK 2 -- cued reward at one spout at a time, gated by position
 //
-//  The mouse's first lick opens a trial: a go cue plays (T2_CUE_FREQ /
-//  T2_CUE_DUR, default 6 kHz for 100 ms), water is delivered at the spout that
-//  was licked, and the gate is closed for that spout's REWARD_INTERVAL before
-//  the next trial opens. Licks after the first are ignored for the rest of the
-//  trial, which is what "multiple licks trigger only one reward" means.
+//  The whole task is gated by the position switch. Out of position, nothing
+//  happens. In position, the machine cues, waits for a lick, waters, waits out
+//  the gate, and cues again -- indefinitely, until the mouse leaves.
 //
-//  T2_CUE_TO_WATER sets when water arrives relative to cue ONSET. The default
-//  of 100 ms equals T2_CUE_DUR, so water lands at cue offset; set it to 0 to
-//  deliver at cue onset instead (one loop cycle later, well under 1 ms now that
-//  the grating is out of the loop).
+//  A trial is: go cue (T2_CUE_FREQ / T2_CUE_DUR) -> T2_CUE_TO_WATER, during
+//  which licks are recorded but earn nothing -> the next lick on the active
+//  spout delivers water -> that spout's REWARD_INTERVAL -> cue again. There is
+//  no response deadline: the machine waits for the lick as long as the mouse
+//  stays in position.
 //
-//      WAIT_LICK  --lick on an enabled spout-->  CUE   (play the go cue)
-//      CUE        --T2_CUE_TO_WATER elapsed-->   REFRACTORY  (deliver water)
-//      REFRACTORY --REWARD_INTERVALn elapsed-->  WAIT_LICK   (trial++)
+//  ALTERNATION. Only one spout is active at a time: spout 1 for T2_N1 rewards,
+//  then spout 2 for T2_N2 rewards, repeating. The inactive spout's licks are
+//  logged and ignored. This is a rule of the task, not a setting, so it has no
+//  on/off switch -- only the block lengths are exposed.
+//
+//  A block length of zero retires that spout: T2_N1 = 0 puts every trial on
+//  spout 2. This, and not T1_SPOUTn_ENABLE, is how task 2 takes a spout out of
+//  use -- those two parameters belong to task 1 and this task never reads them.
+//  With both lengths zero no spout is live, and the machine does what it does
+//  in every other dead end: cues once when the mouse arrives, then waits.
+//
+//  LEAVING POSITION aborts the trial in progress from any state and releases
+//  the gate: come straight back and a new cue plays at once. What survives is
+//  the block counter, so a mouse that fidgets in and out still works through
+//  its T2_N1 rewards on spout 1 rather than restarting the block every time.
+//
+//      IDLE       --in position-->                 CUE  (play the go cue)
+//      CUE        --T2_CUE_TO_WATER elapsed-->      WAIT_LICK
+//      WAIT_LICK  --lick on the active spout-->     REFRACTORY  (water, trial++)
+//      REFRACTORY --REWARD_INTERVALn elapsed-->     CUE
+//      any state  --out of position-->              IDLE
 // ===========================================================================
 
 enum : uint8_t {
-  T2_WAIT_LICK = 0,
+  T2_IDLE = 0,
   T2_CUE,
+  T2_WAIT_LICK,
   T2_REFRACTORY,
   T2_STATE_COUNT,
 };
@@ -86,14 +104,20 @@ public:
   const char *name() const override { return "CUED_REWARD"; }
   uint8_t     stateCount() const override { return T2_STATE_COUNT; }
   const char *stateName(uint8_t s) const override;
-  bool        safeToSwitch() const override { return state() == T2_WAIT_LICK; }
+  bool        safeToSwitch() const override { return state() == T2_IDLE; }
+  void        reset(uint32_t now) override;   // also restarts the block
 
 protected:
   uint8_t onEvent(uint8_t s, const Inputs &in, ActionQueue &out) override;
   void    onEntry(uint8_t s, const Inputs &in, ActionQueue &out) override;
 
 private:
-  uint8_t side_ = 0;        // spout that opened the current trial (1 or 2)
+  void selectSide();                    // resolve this trial's spout, once per cue
+  void advanceBlock();                  // count a reward, alternate when due
+
+  uint8_t  side_     = 1;   // spout the current block is running (1, 2, 0 = none)
+  uint32_t done_     = 0;   // rewards delivered so far in this block
+  uint32_t interval_ = 0;   // gate length chosen by the spout that rewarded
 };
 
 

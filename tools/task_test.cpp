@@ -24,6 +24,8 @@ unsigned long REWARD_INTERVAL2 = 2000;
 unsigned long T2_CUE_FREQ      = 6000;
 unsigned long T2_CUE_DUR       = 100;
 unsigned long T2_CUE_TO_WATER  = 100;
+unsigned long T2_N1            = 3;
+unsigned long T2_N2            = 2;
 
 static int g_failures = 0;
 
@@ -44,7 +46,11 @@ public:
   }
 
   // Run one cycle with the given events, then clear the log-visible trace.
-  void cycle(uint32_t events = 0, uint32_t levels = LV_SPOUT1_EN | LV_SPOUT2_EN) {
+  // The default levels are "mouse in position, both spouts on": task 1 ignores
+  // the position bit, and task 2 is gated by it, so tests that want the mouse
+  // away pass the levels explicitly.
+  void cycle(uint32_t events = 0,
+             uint32_t levels = LV_IN_POSITION | LV_SPOUT1_EN | LV_SPOUT2_EN) {
     Inputs in;
     in.now    = now_;
     in.events = events;
@@ -138,13 +144,13 @@ static void test_task1_shared_gate_uses_that_spouts_interval() {
 static void test_task1_disabled_spout() {
   printf("task 1: a disabled spout cannot earn water or touch the gate\n");
   Harness h(taskById(1));
-  h.cycle(0, LV_SPOUT1_EN);                     // spout 2 disabled
+  h.cycle(0, LV_IN_POSITION | LV_SPOUT1_EN);    // spout 2 disabled
   h.clearTrace();
 
-  h.cycle(EV_LICK2, LV_SPOUT1_EN);
+  h.cycle(EV_LICK2, LV_IN_POSITION | LV_SPOUT1_EN);
   check(h.trace() == "", "lick on the disabled spout does nothing");
 
-  h.cycle(EV_LICK1, LV_SPOUT1_EN);
+  h.cycle(EV_LICK1, LV_IN_POSITION | LV_SPOUT1_EN);
   check(h.trace() == "[REFRACTORY]REWARD(1)",
         "the gate was still open: the enabled spout still works");
 }
@@ -161,83 +167,171 @@ static void test_task1_simultaneous_licks() {
 
 
 // ===========================================================================
-//  TASK 2 -- cued reward, one reward per trial
+//  TASK 2 -- cued reward at one spout at a time, gated by position
 // ===========================================================================
 
-static void test_task2_full_trial() {
-  printf("task 2: first lick -> cue -> water -> gate -> next trial\n");
-  Harness h(taskById(2));
+// "Mouse away from the port", for the tests that need it.
+static const uint32_t AWAY = LV_SPOUT1_EN | LV_SPOUT2_EN;
 
-  h.cycle();
-  check(h.trace() == "[WAIT_LICK]", "starts in WAIT_LICK");
-  h.clearTrace();
-
-  h.cycle(EV_LICK2);
-  check(h.trace() == "[CUE]TONE(6000,100)", "lick opens the trial and plays the go cue");
-  h.clearTrace();
-
-  h.advance(99);
-  check(h.trace() == "", "no water before T2_CUE_TO_WATER");
-  h.advance(2);
-  check(h.trace() == "[REFRACTORY]REWARD(2)",
-        "water at cue offset, on the spout that was licked");
-  h.clearTrace();
-
-  h.advance(2000);                              // REWARD_INTERVAL2
-  check(h.trace() == "[WAIT_LICK]", "next trial opens after the spout's interval");
-  check(h.task()->trial() == 1, "one completed trial counted");
+// Every REWARD(n) in the trace, in order, as a string of spout digits. Written
+// so a whole alternation block can be asserted as one literal.
+static std::string rewardSeq(const std::string &t) {
+  std::string s;
+  for (size_t p = t.find("REWARD("); p != std::string::npos; p = t.find("REWARD(", p + 1))
+    s += t[p + 7];
+  return s;
 }
 
-static void test_task2_only_first_lick_counts() {
-  printf("task 2: extra licks within a trial are ignored\n");
+static void test_task2_full_trial() {
+  printf("task 2: in position -> cue -> lick -> water -> gate -> cue again\n");
   Harness h(taskById(2));
+
+  h.cycle(0, AWAY);
+  check(h.trace() == "[IDLE]", "starts in IDLE and stays there out of position");
+  h.clearTrace();
+
   h.cycle();
+  check(h.trace() == "[CUE]TONE(6000,100)", "arriving in position plays the go cue");
   h.clearTrace();
 
   h.cycle(EV_LICK1);
+  check(h.trace() == "", "a lick inside T2_CUE_TO_WATER earns nothing");
+  h.advance(101);
+  check(h.trace() == "[WAIT_LICK]", "the lick window opens after T2_CUE_TO_WATER");
   h.clearTrace();
 
-  // Lick storm through the cue and the whole gate: exactly one reward total.
-  for (int i = 0; i < 40; i++) { h.bump(50); h.cycle(EV_LICK1 | EV_LICK2); }
+  h.advance(5000);
+  check(h.trace() == "", "and then waits indefinitely: there is no response deadline");
+  h.clearTrace();
 
-  size_t rewards = 0;
-  const std::string &t = h.trace();
-  for (size_t p = t.find("REWARD"); p != std::string::npos; p = t.find("REWARD", p + 1))
-    rewards++;
-  check(rewards == 1, "exactly one reward despite 40 cycles of licking");
-  check(t.find("REWARD(1)") != std::string::npos, "and it went to the licked spout");
+  h.cycle(EV_LICK2);
+  check(h.trace() == "", "a lick on the blocked spout does nothing");
+
+  h.cycle(EV_LICK1);
+  check(h.trace() == "[REFRACTORY]REWARD(1)", "a lick on the active spout waters it");
+  check(h.task()->trial() == 1, "counted at the moment of reward, not at gate end");
+  h.clearTrace();
+
+  h.advance(2999);
+  check(h.trace() == "", "still gated at 2999 ms, spout 1's own interval");
+  h.advance(2);
+  check(h.trace() == "[CUE]TONE(6000,100)", "cues again with no lick needed to start");
 }
 
-static void test_task2_cue_at_onset() {
-  printf("task 2: T2_CUE_TO_WATER = 0 delivers at cue onset\n");
+static void test_task2_one_reward_per_gate() {
+  printf("task 2: a lick storm inside one gate still earns exactly one reward\n");
+  Harness h(taskById(2));
+  h.cycle();
+  h.clearTrace();
+
+  // 2000 ms of licking, well inside REWARD_INTERVAL1 = 3000.
+  for (int i = 0; i < 40; i++) { h.bump(50); h.cycle(EV_LICK1 | EV_LICK2); }
+  check(rewardSeq(h.trace()) == "1", "one reward, on the active spout, despite 40 licks");
+}
+
+static void test_task2_alternation() {
+  printf("task 2: T2_N1 rewards at spout 1, then T2_N2 at spout 2, repeating\n");
+  Harness h(taskById(2));       // reset() must also restart the block at spout 1
+
+  // Lick both spouts on every cycle: only the active one can ever be rewarded,
+  // so the sequence below is produced entirely by the alternation rule.
+  for (uint32_t i = 0; i < 20000; i++) { h.bump(1); h.cycle(EV_LICK1 | EV_LICK2); }
+
+  std::string seq = rewardSeq(h.trace());
+  check(seq.size() >= 6, "at least six rewards in 20 s");
+  check(seq.substr(0, 6) == "111221",
+        "T2_N1 = 3 at spout 1, T2_N2 = 2 at spout 2, then back to spout 1");
+}
+
+static void test_task2_block_survives_leaving() {
+  printf("task 2: leaving position aborts the trial but keeps the block counter\n");
+  Harness h(taskById(2));
+
+  // One reward on spout 1 (block is 3 long), then walk off mid-gate.
+  h.cycle();
+  h.advance(101);
+  h.cycle(EV_LICK1);
+  h.clearTrace();
+  h.advance(500);
+  h.cycle(0, AWAY);
+  check(h.trace() == "[IDLE]", "leaving mid-gate drops straight to IDLE");
+  h.clearTrace();
+
+  h.cycle();
+  check(h.trace() == "[CUE]TONE(6000,100)",
+        "the gate is released, not resumed: coming back cues at once");
+  h.clearTrace();
+
+  // Two more rewards finish the spout-1 block; the third must flip to spout 2.
+  for (uint32_t i = 0; i < 10000; i++) { h.bump(1); h.cycle(EV_LICK1 | EV_LICK2); }
+  check(rewardSeq(h.trace()).substr(0, 3) == "112",
+        "the block resumed at reward 2 of 3 rather than restarting");
+}
+
+static void test_task2_licks_from_onset() {
+  printf("task 2: T2_CUE_TO_WATER = 0 makes licks count from cue onset\n");
   unsigned long saved = T2_CUE_TO_WATER;
   T2_CUE_TO_WATER = 0;
 
   Harness h(taskById(2));
   h.cycle();
+  check(h.trace() == "[CUE]TONE(6000,100)", "the cue still plays for its full 100 ms");
+  h.clearTrace();
+
+  h.cycle();
+  check(h.trace() == "[WAIT_LICK]", "the lick window opens on the very next cycle");
   h.clearTrace();
 
   h.cycle(EV_LICK1);
-  check(h.trace() == "[CUE]TONE(6000,100)", "cue still plays for its full 100 ms");
-  h.clearTrace();
-
-  h.advance(1);
-  check(h.trace() == "[REFRACTORY]REWARD(1)", "water on the very next cycle");
+  check(h.trace() == "[REFRACTORY]REWARD(1)", "and the next lick waters immediately");
 
   T2_CUE_TO_WATER = saved;
 }
 
-static void test_task2_disabled_spout() {
-  printf("task 2: a disabled spout cannot open a trial\n");
+static void test_task2_ignores_the_task1_flags() {
+  printf("task 2: T1_SPOUTn_ENABLE is task 1's, and task 2 does not read it\n");
   Harness h(taskById(2));
-  h.cycle(0, LV_SPOUT2_EN);                     // spout 1 disabled
+  const uint32_t lv = LV_IN_POSITION;           // BOTH spouts off as far as task 1 cares
+
+  for (uint32_t i = 0; i < 20000; i++) { h.bump(1); h.cycle(EV_LICK1 | EV_LICK2, lv); }
+  check(rewardSeq(h.trace()).substr(0, 6) == "111221",
+        "the alternation runs exactly as if the flags were on");
+}
+
+static void test_task2_zero_block_retires_a_spout() {
+  printf("task 2: T2_N1 = 0 puts every trial on spout 2\n");
+  unsigned long saved = T2_N1;
+  T2_N1 = 0;
+
+  Harness h(taskById(2));
+  for (uint32_t i = 0; i < 20000; i++) { h.bump(1); h.cycle(EV_LICK1 | EV_LICK2); }
+
+  std::string seq = rewardSeq(h.trace());
+  check(seq.size() >= 6, "trials still run");
+  check(seq.find('1') == std::string::npos,
+        "and none of them are on spout 1, however long T2_N2 makes the blocks");
+
+  T2_N1 = saved;
+}
+
+static void test_task2_both_blocks_zero_stops_the_task() {
+  printf("task 2: both block lengths zero -- one cue on arrival, then nothing\n");
+  unsigned long s1 = T2_N1, s2 = T2_N2;
+  T2_N1 = 0;
+  T2_N2 = 0;
+
+  Harness h(taskById(2));
+  h.cycle();
+  check(h.trace() == "[CUE]TONE(6000,100)", "the mouse still gets its one cue");
   h.clearTrace();
 
-  h.cycle(EV_LICK1, LV_SPOUT2_EN);
-  check(h.trace() == "", "lick on the disabled spout does not start a trial");
+  for (uint32_t i = 0; i < 20000; i++) { h.bump(1); h.cycle(EV_LICK1 | EV_LICK2); }
+  check(h.trace() == "[WAIT_LICK]",
+        "then it opens the lick window once and waits there for good");
+  check(h.task()->trial() == 0, "no trial, no water, no second cue");
 
-  h.cycle(EV_LICK2, LV_SPOUT2_EN);
-  check(h.trace() == "[CUE]TONE(6000,100)", "the enabled spout still does");
+  T2_N1 = s1;
+  T2_N2 = s2;
 }
 
 
@@ -255,9 +349,9 @@ static void test_switch_safety() {
   check(!h1.task()->safeToSwitch(), "task 1 mid-gate is not");
 
   Harness h2(taskById(2));
+  h2.cycle(0, AWAY);
+  check(h2.task()->safeToSwitch(), "task 2 in IDLE is switchable");
   h2.cycle();
-  check(h2.task()->safeToSwitch(), "task 2 in WAIT_LICK is switchable");
-  h2.cycle(EV_LICK1);
   check(!h2.task()->safeToSwitch(), "task 2 mid-trial is not");
 }
 
@@ -266,15 +360,14 @@ static void test_reset_is_clean() {
   Task *t = taskById(2);
   Harness h(t, 5000);
   h.cycle();
+  h.advance(T2_CUE_TO_WATER + 1);               // through the cue into WAIT_LICK
   h.cycle(EV_LICK1);
-  // A whole trial is T2_CUE_TO_WATER + REWARD_INTERVAL1, so allow for both.
-  h.advance(T2_CUE_TO_WATER + REWARD_INTERVAL1 + 10);
   check(t->trial() >= 1, "a trial was completed before the reset");
 
   Harness fresh(t, 90000);                      // reset() via the constructor
-  fresh.cycle();
+  fresh.cycle(0, AWAY);
   check(t->trial() == 0, "trial count cleared");
-  check(fresh.trace() == "[WAIT_LICK]", "back in the initial state");
+  check(fresh.trace() == "[IDLE]", "back in the initial state");
 }
 
 static void test_timeout_does_not_leak() {
@@ -313,9 +406,13 @@ int main() {
   test_task1_simultaneous_licks();
 
   test_task2_full_trial();
-  test_task2_only_first_lick_counts();
-  test_task2_cue_at_onset();
-  test_task2_disabled_spout();
+  test_task2_one_reward_per_gate();
+  test_task2_alternation();
+  test_task2_block_survives_leaving();
+  test_task2_licks_from_onset();
+  test_task2_ignores_the_task1_flags();
+  test_task2_zero_block_retires_a_spout();
+  test_task2_both_blocks_zero_stops_the_task();
 
   test_switch_safety();
   test_reset_is_clean();

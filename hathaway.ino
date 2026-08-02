@@ -118,11 +118,15 @@ static const CmdSpec CMD_TABLE[] = {
   // The PARAM ack therefore means "request accepted"; the TASK telemetry line
   // marks the cycle on which the switch actually happened.
   PARAM_U32(TASK,              1,   2,     nullptr),
-  PARAM_U32(SPOUT1_ENABLE,     0,   1,     nullptr),
-  PARAM_U32(SPOUT2_ENABLE,     0,   1,     nullptr),
+  PARAM_U32(T1_SPOUT1_ENABLE,  0,   1,     nullptr),
+  PARAM_U32(T1_SPOUT2_ENABLE,  0,   1,     nullptr),
   PARAM_U32(T2_CUE_FREQ,       100, 20000, nullptr),
   PARAM_U32(T2_CUE_DUR,        1,   5000,  nullptr),
   PARAM_U32(T2_CUE_TO_WATER,   0,   5000,  nullptr),
+  // Block lengths. Zero is legal and means "this spout gets no trials", which
+  // is how task 2 takes a spout out of use; both zero leaves nothing to run.
+  PARAM_U32(T2_N1,             0,   10000, nullptr),
+  PARAM_U32(T2_N2,             0,   10000, nullptr),
   ACTION(TARE, doTare),
 };
 static const size_t CMD_COUNT = sizeof(CMD_TABLE) / sizeof(CMD_TABLE[0]);
@@ -204,8 +208,8 @@ static Inputs sense() {
   }
 
   // --- operator switches -------------------------------------------------
-  if (SPOUT1_ENABLE) in.levels |= LV_SPOUT1_EN;
-  if (SPOUT2_ENABLE) in.levels |= LV_SPOUT2_EN;
+  if (T1_SPOUT1_ENABLE) in.levels |= LV_SPOUT1_EN;
+  if (T1_SPOUT2_ENABLE) in.levels |= LV_SPOUT2_EN;
 
   return in;
 }
@@ -235,6 +239,10 @@ static void act(const ActionQueue &q, uint32_t now) {
     const Action &a = q.at(i);
     switch (a.verb) {
       case ACT_REWARD:
+        // No enable check here. A task that must not water a spout simply does
+        // not ask -- task 1 filters the lick, task 2 gives that spout no block.
+        // Keeping the policy in the tasks means a REWARD line always follows a
+        // decision that is visible in the task's own state trace.
         if (a.a0 == 1) {
           rewarder1.deliver_reward(a.a1);
           rewardNum1++;
