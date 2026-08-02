@@ -161,6 +161,9 @@ class SerialLink:
 class Controller:
     # Queue marker: "this rig announced its schema, so it may have restarted".
     BOOT_HINT = "#boot-hint"
+    # Queue marker: "the operator removed this port; start a new session next time
+    # this rig sends something".
+    SESSION_END = "#session-end"
 
     def __init__(self, db, note="", baud=115200):
         self.db = db
@@ -212,6 +215,16 @@ class Controller:
         self.port_rx.pop(port, None)
         if rig_id is not None and self.link_by_rig.get(rig_id) is link:
             del self.link_by_rig[rig_id]
+        if rig_id is not None:
+            # End the session, so re-adding the port starts a new one. Sent
+            # through the queue rather than editing self.sessions here: that dict
+            # belongs to the DB thread, and anything already queued from before
+            # this click must still be filed under the OLD session.
+            #
+            # Only an explicit removal does this. A dropped USB cable is handled
+            # by SerialLink reconnecting on its own, which deliberately keeps the
+            # session running.
+            self.recq.put((rig_id, self.SESSION_END, *self._stamps()))
         return True, f"closed {port}"
 
     def list_available_ports(self):
@@ -369,6 +382,13 @@ class Controller:
 
                 if recs is self.BOOT_HINT:
                     clock.arm_boot()
+                    continue
+
+                if recs is self.SESSION_END:
+                    # Forget the session id. _session() inserts a fresh row the
+                    # next time this rig sends anything, which is what makes the
+                    # session number advance on remove-and-add.
+                    self.sessions.pop(rig_id, None)
                     continue
 
                 sid = self._session(rig_id)
