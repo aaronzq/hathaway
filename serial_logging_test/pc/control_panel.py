@@ -562,7 +562,13 @@ HTML_PAGE = """<!doctype html>
  .control{grid-column:2;display:flex;flex-direction:column;padding:12px;overflow:auto}
  .chead{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;font-size:14px}
  .midrow{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap}
- .params-col{flex:1 1 260px;min-width:0}
+ .params-col{flex:1 1 520px;min-width:0}
+ /* Two parameter columns: core on the left, the selected task's on the right. */
+ .pcols{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+ .pcol{flex:1 1 250px;min-width:0}
+ .ttl2{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#6f8b84;
+       margin:0 0 6px;padding-bottom:4px;
+       border-bottom:1px solid rgba(140,160,180,.12)}
  .hero{flex:0 0 180px;display:flex;flex-direction:column;justify-content:center;
        text-align:center;border-left:1px solid rgba(140,160,180,.12);padding-left:16px}
  .hero .rig{font-size:14px;color:#8b93a2;letter-spacing:1px}
@@ -615,8 +621,18 @@ HTML_PAGE = """<!doctype html>
       <div class="params-col">
         <div id="ctl" style="display:none">
           <div style="margin-bottom:8px"><button id="fetchbtn">Fetch</button></div>
-          <table><tr><th>parameter</th><th style="text-align:right">current</th>
-            <th>new</th><th></th></tr><tbody id="ctlparams"></tbody></table>
+          <div class="pcols">
+            <div class="pcol">
+              <div class="ttl2">Core</div>
+              <table><tr><th>parameter</th><th style="text-align:right">current</th>
+                <th>new</th><th></th></tr><tbody id="coreparams"></tbody></table>
+            </div>
+            <div class="pcol">
+              <div class="ttl2">Task</div>
+              <table><tr><th>parameter</th><th style="text-align:right">current</th>
+                <th>new</th><th></th></tr><tbody id="taskparams"></tbody></table>
+            </div>
+          </div>
         </div>
         <div id="ctlnone" class="muted">Select a running rig to control it.</div>
       </div>
@@ -678,14 +694,31 @@ function renderConnections(state){
 
 // ---- Control sector: one rig at a time, selected by Rig ID ----
 let selectedRig="", ctlRows={}, ctlRigForRows=null, lastState=null;
+
+// Which column a parameter belongs in, and which task it belongs to, worked out
+// from its NAME alone: "T<n>_..." is task n's, "TASK" heads the task column,
+// everything else is core. Deriving it this way keeps the panel's promise of
+// not duplicating the firmware's parameter list -- a T4_* parameter added to
+// CMD_TABLE tomorrow lands in the right column with no change here.
+function paramGroup(name){
+  if(name==='TASK')return 0;              // 0 = always visible
+  const m=/^T(\\d+)_/.exec(name);
+  return m?Number(m[1]):0;
+}
 function ensureCtlRow(rig,name){
   if(ctlRows[name])return;
+  const task=paramGroup(name);
   const tr=document.createElement('tr');
   tr.innerHTML='<td>'+name+'</td><td class="cur" data-cur>&mdash;</td>'
     +'<td><input placeholder="value"></td><td><button>Set</button></td>';
   const inp=tr.querySelector('input');
   tr.querySelector('button').onclick=function(){send(rig,name,inp);};
-  document.getElementById('ctlparams').appendChild(tr);
+  tr.dataset.task=task;
+  const body=document.getElementById(
+    (name==='TASK'||task>0)?'taskparams':'coreparams');
+  // TASK heads its column whatever order the PARAM acks happen to arrive in.
+  if(name==='TASK'&&body.firstChild)body.insertBefore(tr,body.firstChild);
+  else body.appendChild(tr);
   ctlRows[name]=tr;
 }
 function renderControl(state){
@@ -705,13 +738,22 @@ function renderControl(state){
   cp.textContent=rigPort[rig];
   hero.textContent='RIG '+rig;
   if(ctlRigForRows!==rig){        // switched rigs: rebuild the parameter rows
-    document.getElementById('ctlparams').innerHTML='';ctlRows={};ctlRigForRows=rig;}
+    document.getElementById('coreparams').innerHTML='';
+    document.getElementById('taskparams').innerHTML='';
+    ctlRows={};ctlRigForRows=rig;}
   const r=state.rigs[rig]||{};
   w.textContent=(r.weight!=null)?(r.weight+' g'):'\\u2014';
   const params=r.params||{};
   Object.keys(params).forEach(function(name){
     ensureCtlRow(rig,name);
     ctlRows[name].querySelector('[data-cur]').textContent=params[name];});
+  // Show only the running task's parameters. Until the rig reports TASK, cur is
+  // undefined and every T<n>_ row stays hidden -- better than showing all three
+  // tasks' parameters at once and letting the operator set one that is not live.
+  const cur=Number(params['TASK']);
+  Object.keys(ctlRows).forEach(function(n){
+    const t=Number(ctlRows[n].dataset.task);
+    ctlRows[n].style.display=(t===0||t===cur)?'':'none';});
   lg.textContent=(r.log||[]).slice(-20).reverse().join('\\n')||'(no messages)';
 }
 

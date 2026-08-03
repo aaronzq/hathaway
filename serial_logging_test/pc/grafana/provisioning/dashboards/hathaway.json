@@ -6,12 +6,12 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 101,
+  "version": 104,
   "editable": true,
   "liveNow": false,
   "refresh": "500ms",
   "time": {
-    "from": "now-2m",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
@@ -85,7 +85,29 @@
     ]
   },
   "templating": {
-    "list": []
+    "list": [
+      {
+        "name": "total_trials",
+        "label": "Trials in current session",
+        "description": "Trials booked in the current session, used to label the outcome pie chart's title. Gated identically to that panel's query, so the number and the slices can never disagree. Hidden: it is a read-out, not a control. refresh 2 = re-query on time-range change, which the dashboard's auto-refresh triggers.",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "hathaway_pg"
+        },
+        "query": "SELECT count(*) FROM events_dev, (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d WHERE type = 'OUTCOME' AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles' AND host_ts < (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'",
+        "refresh": 2,
+        "hide": 2,
+        "skipUrlSync": true,
+        "multi": false,
+        "includeAll": false,
+        "current": {},
+        "options": [],
+        "allowCustomValue": true,
+        "regex": "",
+        "sort": 0
+      }
+    ]
   },
   "links": [],
   "panels": [
@@ -95,7 +117,7 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 6
+        "h": 5
       },
       "type": "timeseries",
       "title": "Weight scale",
@@ -177,11 +199,18 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "enableFacetedFilter": false,
+          "overflow": "ellipsis"
         },
         "tooltip": {
           "mode": "single",
-          "sort": "none"
+          "sort": "none",
+          "hideZeros": false
+        },
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
         }
       }
     },
@@ -189,13 +218,13 @@
       "id": 4,
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 5,
         "w": 24,
         "h": 6
       },
       "type": "timeseries",
-      "title": "Lick & Reward events",
-      "description": "",
+      "title": "Lick, Reward & Outcome events",
+      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -240,6 +269,50 @@
           "format": "time_series",
           "rawQuery": true,
           "rawSql": "SELECT dev_ts AS time, 3.5 AS reward2 FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- Outcome rows. All four sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort.\r\n--\r\n-- Kept as four separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS incorrect FROM events_dev WHERE type = 'OUTCOME' AND channel = 1 AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS \"no response\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 2 AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "H",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS abort FROM events_dev WHERE type = 'OUTCOME' AND channel = 3 AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -281,7 +354,7 @@
               "mode": "off"
             }
           },
-          "max": 4.5,
+          "max": 5.5,
           "min": 0.5,
           "thresholds": {
             "mode": "absolute",
@@ -297,18 +370,150 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "hit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "incorrect"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "no response"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "abort"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lick1",
+              "scope": "series"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#ffffff"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "lick2",
+              "scope": "series"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#9b9b9b"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reward1",
+              "scope": "series"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#00f2ff"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "reward2",
+              "scope": "series"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#097b77"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "enableFacetedFilter": false,
+          "overflow": "ellipsis"
         },
         "tooltip": {
           "mode": "multi",
-          "sort": "none"
+          "sort": "none",
+          "hideZeros": false
+        },
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
         }
       }
     },
@@ -316,7 +521,7 @@
       "id": 2,
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 11,
         "w": 24,
         "h": 5
       },
@@ -423,11 +628,18 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": true,
+          "enableFacetedFilter": false,
+          "overflow": "ellipsis"
         },
         "tooltip": {
           "mode": "single",
-          "sort": "none"
+          "sort": "none",
+          "hideZeros": false
+        },
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
         }
       }
     },
@@ -435,13 +647,13 @@
       "id": 3,
       "gridPos": {
         "x": 0,
-        "y": 17,
-        "w": 7,
-        "h": 7
+        "y": 16,
+        "w": 6,
+        "h": 8
       },
       "type": "gauge",
-      "title": "Cumulative rewards (Total)",
-      "description": "",
+      "title": "Cumulative rewards (Session)",
+      "description": "Water delivered per spout in the CURRENT session -- the highest session_id, which is the one the panel is logging to right now. Closing and re-adding a port starts a new session, so this resets then; it is not a running total for the day.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -495,20 +707,35 @@
         },
         "showThresholdLabels": false,
         "showThresholdMarkers": true,
-        "sizing": "auto"
+        "sizing": "auto",
+        "barShape": "flat",
+        "barWidthFactor": 0.5,
+        "effects": {
+          "barGlow": false,
+          "centerGlow": false,
+          "gradient": true
+        },
+        "endpointMarker": "point",
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "segmentCount": 1,
+        "segmentSpacing": 0.3,
+        "shape": "gauge",
+        "sparkline": true,
+        "textMode": "auto"
       }
     },
     {
-      "id": 5,
+      "id": 6,
       "gridPos": {
-        "x": 7,
-        "y": 17,
-        "w": 17,
-        "h": 7
+        "x": 6,
+        "y": 16,
+        "w": 9,
+        "h": 8
       },
-      "type": "timeseries",
-      "title": "Cumulative rewards",
-      "description": "",
+      "type": "piechart",
+      "title": "Trial outcomes  --  $total_trials trials in current session",
+      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort. Every completed trial is booked under exactly one of them, so the four slices add up to the total in the title.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Note this does NOT match the sum of 'Trials per hour', which covers the whole day: the two differ whenever a day has held more than one session.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -520,27 +747,169 @@
             "type": "postgres",
             "uid": "hathaway_pg"
           },
-          "format": "time_series",
+          "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT ts AS time, reward_index AS reward1 FROM (SELECT dev_ts AS ts, count(*) OVER (ORDER BY t_us) AS reward_index FROM events_dev WHERE type = 'REWARD' AND channel = 1 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "postgres",
-            "uid": "hathaway_pg"
-          },
-          "format": "time_series",
-          "editorMode": "code",
-          "rawQuery": true,
-          "rawSql": "SELECT ts AS time, reward_index AS reward2 FROM (SELECT dev_ts AS ts, count(*) OVER (ORDER BY t_us) AS reward_index FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND session_id = (SELECT max(session_id) FROM sessions) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles') q WHERE $__timeFilter(ts) ORDER BY ts"
+          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\r\n--\r\n-- Gated to the current session exactly as 'Cumulative rewards (Session)' is:\r\n-- the max session_id, plus the start of the local day. The day bound matters\r\n-- for a session that has run past midnight -- it keeps the pie on today's\r\n-- part of it.\r\n--\r\n-- Filtered on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks.\r\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\r\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\r\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\r\n       count(*) FILTER (WHERE channel = 3) AS \"abort\"\r\n  FROM events_dev,\r\n       (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d\r\n WHERE type = 'OUTCOME'\r\n   AND session_id = (SELECT max(session_id) FROM sessions)\r\n   AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n   AND host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic",
+            "fixedColor": "#73BF69"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "hit"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "HIT"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "incorrect"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "INCORRECT"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "no response"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-orange"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "NO RESPONSE"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "abort"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "dark-blue"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "ABORT"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "pieType": "pie",
+        "displayLabels": [
+          "name",
+          "value"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ],
+          "overflow": "ellipsis"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none",
+          "hideZeros": false
+        },
+        "sort": "desc"
+      }
+    },
+    {
+      "id": 7,
+      "gridPos": {
+        "x": 15,
+        "y": 16,
+        "w": 9,
+        "h": 8
+      },
+      "type": "barchart",
+      "title": "Trials per hour (today)",
+      "description": "Trials booked in each hour of the current local day, across ALL sessions in that day. All 24 bins are always drawn: generate_series supplies the hours and the LEFT JOIN fills the empty ones with zero, so the shape of the day is visible from the first trial onwards.\n\nDeliberately ignores the dashboard time range -- it is always the whole of today, which is the point of it. Also deliberately NOT session-gated, unlike the two panels to its left: a per-hour view of the day that reset on every reconnect would not show the shape of the day.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "hathaway_pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "table",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "-- 24 hourly bins for the current local day, zero-filled.\r\n--\r\n-- No $__timeFilter anywhere: this panel is always \"today\", whatever the\r\n-- dashboard's time picker says. That is intentional -- it is the one panel\r\n-- meant to give the shape of the whole session day while the rest of the\r\n-- dashboard sits on a 2-minute live window.\r\nWITH d AS (\r\n  SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm\r\n),\r\nbins AS (\r\n  SELECT generate_series(0, 23) AS hr\r\n),\r\ntrials AS (\r\n  SELECT date_part('hour', e.host_ts AT TIME ZONE 'America/Los_Angeles')::int AS hr,\r\n         count(*) AS n\r\n    FROM events_dev e, d\r\n   WHERE e.type = 'OUTCOME'\r\n     AND e.host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n     AND e.host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'\r\n   GROUP BY 1\r\n)\r\nSELECT lpad(b.hr::text, 2, '0') || ':00' AS \"hour\",\r\n       COALESCE(t.n, 0)::bigint          AS \"trials\"\r\n  FROM bins b\r\n  LEFT JOIN trials t ON t.hr = b.hr\r\n ORDER BY b.hr"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
           },
           "custom": {
             "axisBorderShow": false,
@@ -548,34 +917,24 @@
             "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
+            "fillOpacity": 80,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
             "lineWidth": 1,
-            "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
             }
           },
+          "mappings": [],
+          "min": 0,
+          "unit": "none",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -593,17 +952,32 @@
         "overrides": []
       },
       "options": {
+        "orientation": "vertical",
+        "xField": "hour",
+        "showValue": "never",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.9,
+        "fullHighlight": false,
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 100,
         "legend": {
           "calcs": [],
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": false,
+          "overflow": "ellipsis"
         },
         "tooltip": {
           "mode": "single",
-          "sort": "none"
-        }
+          "sort": "none",
+          "hideZeros": false
+        },
+        "barRadius": 0
       }
     }
-  ]
+  ],
+  "graphTooltip": 0,
+  "fiscalYearStartMonth": 0,
+  "preload": false
 }

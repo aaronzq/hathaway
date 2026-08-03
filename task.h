@@ -86,8 +86,15 @@ struct Inputs {
 // every decision a single place to be logged from.
 
 enum : uint8_t {
-  ACT_REWARD,   // a0 = spout (1 or 2), a1 = open ms (0 = that spout's default)
-  ACT_TONE,     // a0 = frequency Hz,   a1 = duration ms
+  ACT_REWARD,      // a0 = spout (1 or 2), a1 = open ms (0 = that spout's default)
+  ACT_TONE,        // a0 = frequency Hz,   a1 = duration ms
+  // A pulsed tone: a0 = frequency Hz, and the pulse width, gap and count come
+  // from the tunables the sketch reads in act(). They are deliberately NOT in
+  // a0/a1 -- an Action carries two arguments, and widening it for one verb
+  // would cost every other verb a bigger queue. The task computes the train's
+  // total duration from the same tunables when it arms its own timeout, so the
+  // two can never disagree.
+  ACT_TONE_TRAIN,
 };
 
 struct Action {
@@ -120,6 +127,25 @@ private:
   Action   q_[CAP];
   uint8_t  n_        = 0;
   uint32_t overflow_ = 0;
+};
+
+
+// ============================== TRIAL OUTCOMES =============================
+//
+// How a trial ended. Every completed trial is exactly one of these, counted
+// once, so hit + incorrect + no-response + abort == trial().
+//
+// A task that cannot fail reports only OUTCOME_HIT and leaves the other three
+// at zero -- that is the case for tasks 1 and 2, where a trial exists only
+// because water was delivered. The counters are on the base class rather than
+// on task 3 so the sketch can log an outcome without knowing which task ran.
+
+enum : uint8_t {
+  OUTCOME_HIT = 0,        // the animal did the right thing
+  OUTCOME_INCORRECT,      // it responded, on the wrong spout
+  OUTCOME_NO_RESPONSE,    // the response window closed with no answer
+  OUTCOME_ABORT,          // the trial was cut short before it could be answered
+  OUTCOME_COUNT,
 };
 
 
@@ -157,6 +183,14 @@ public:
   uint32_t trial()       const { return trial_; }
   uint32_t transitions() const { return transitions_; }
 
+  // How the last completed trial ended, and the running tally per outcome. The
+  // sketch watches trial() for a change and then reads lastOutcome(), which is
+  // why the outcome must be recorded in the same call that bumps the counter.
+  uint8_t  lastOutcome() const { return lastOutcome_; }
+  uint32_t outcomeCount(uint8_t o) const {
+    return (o < OUTCOME_COUNT) ? outcomes_[o] : 0;
+  }
+
 protected:
   // The only method a task MUST implement. Return STAY or the next state id.
   virtual uint8_t onEvent(uint8_t state, const Inputs &in, ActionQueue &out) = 0;
@@ -180,7 +214,14 @@ protected:
 
   uint32_t stateElapsed() const { return now_ - enteredMs_; }
   uint32_t now()          const { return now_; }
-  void     countTrial()         { trial_++; }
+  // Close out one trial. The outcome is not optional: a task that forgets to
+  // say how the trial ended would otherwise silently log every trial as a hit,
+  // which is the one mistake here that corrupts data rather than behaviour.
+  void     countTrial(uint8_t outcome) {
+    trial_++;
+    lastOutcome_ = outcome;
+    if (outcome < OUTCOME_COUNT) outcomes_[outcome]++;
+  }
   void     setInitialState(uint8_t s) { state_ = s; }
 
 private:
@@ -196,4 +237,6 @@ private:
   uint32_t trial_        = 0;
   uint32_t transitions_  = 0;
   bool     entered_      = false;
+  uint8_t  lastOutcome_  = OUTCOME_HIT;
+  uint32_t outcomes_[OUTCOME_COUNT] = {0, 0, 0, 0};
 };

@@ -44,10 +44,17 @@ unsigned long g_activeTask = 0;
 ActionQueue   g_actions;
 
 // Last buzzer state reported to the host, so the TONE sample is emitted once on
-// each edge and never repeated. Set true where the note is started (act(), so
-// the onset carries the exact instant playNote was called) and false where the
-// note is seen to have finished (sense()).
-static bool g_toneOn = false;
+// each edge and never repeated.
+//
+// Two flags, because a pulse train has two nested edges. g_toneOn tracks the
+// whole note or train and is what raises EV_TONE_DONE, once, at the end.
+// g_pulseOn tracks whether sound is actually coming out, and is what the TONE
+// telemetry follows -- so a 3-pulse train logs as three on/off pairs rather
+// than one 650 ms block. Both are set at the start in act(), so the first
+// onset carries the exact instant playNote/playTrain was called.
+static bool     g_toneOn   = false;
+static bool     g_pulseOn  = false;
+static uint32_t g_toneFreq = 0;   // frequency to report on later pulse onsets
 
 
 // ===========================================================================
@@ -74,6 +81,7 @@ enum : uint8_t {
   TELEM_TONE,     // channel 1, value = frequency Hz while sounding, 0 = silent
   TELEM_STATE,    // channel = state index (0-based), value = trial number
   TELEM_TASK,     // channel = task id,     value = task id
+  TELEM_OUTCOME,  // channel = OUTCOME_* code (0-based), value = trial number
 };
 
 static const TelemSpec TELEM_TABLE[] = {
@@ -88,6 +96,10 @@ static const TelemSpec TELEM_TABLE[] = {
   { TELEM_TONE,     "TONE",     TELEM_SAMPLE },
   { TELEM_STATE,    "STATE",    TELEM_EVENT  },
   { TELEM_TASK,     "TASK",     TELEM_SAMPLE },
+  // How each trial ended. An EVENT, like STATE: it is an instant, not a level.
+  // The channel is the OUTCOME_* code, so hit / incorrect / no-response / abort
+  // rates come straight out of a GROUP BY on channel.
+  { TELEM_OUTCOME,  "OUTCOME",  TELEM_EVENT  },
 };
 static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 
@@ -117,7 +129,7 @@ static const CmdSpec CMD_TABLE[] = {
   // TASK is applied lazily, at the next trial boundary -- see serviceTask().
   // The PARAM ack therefore means "request accepted"; the TASK telemetry line
   // marks the cycle on which the switch actually happened.
-  PARAM_U32(TASK,              1,   2,     nullptr),
+  PARAM_U32(TASK,              1,   3,     nullptr),
   PARAM_U32(T1_SPOUT1_ENABLE,  0,   1,     nullptr),
   PARAM_U32(T1_SPOUT2_ENABLE,  0,   1,     nullptr),
   PARAM_U32(T2_CUE_FREQ,       100, 20000, nullptr),
@@ -127,6 +139,24 @@ static const CmdSpec CMD_TABLE[] = {
   // is how task 2 takes a spout out of use; both zero leaves nothing to run.
   PARAM_U32(T2_N1,             0,   10000, nullptr),
   PARAM_U32(T2_N2,             0,   10000, nullptr),
+  // --- task 3 --------------------------------------------------------------
+  PARAM_U32(T3_SAMPLE_FREQ1,   100, 20000, nullptr),
+  PARAM_U32(T3_SAMPLE_FREQ2,   100, 20000, nullptr),
+  PARAM_U32(T3_PULSE_MS,       1,   5000,  nullptr),
+  PARAM_U32(T3_GAP_MS,         0,   5000,  nullptr),
+  // At least one pulse: zero would be a sample epoch with no sample in it.
+  PARAM_U32(T3_N_PULSES,       1,   20,    nullptr),
+  PARAM_U32(T3_DELAY_MS,       0,   10000, nullptr),
+  PARAM_U32(T3_CUE_FREQ,       100, 20000, nullptr),
+  PARAM_U32(T3_CUE_DUR,        1,   5000,  nullptr),
+  PARAM_U32(T3_RESPONSE_MS,    1,   30000, nullptr),
+  PARAM_U32(T3_CONSUME_MS,     0,   30000, nullptr),
+  PARAM_U32(T3_PUNISH_MS,      0,   30000, nullptr),
+  PARAM_U32(T3_ITI_MS,         0,   30000, nullptr),
+  // 1 = strict alternation. Zero is excluded: it would force the type to flip
+  // on every trial AND on itself, which is just alternation with a worse name.
+  PARAM_U32(T3_MAX_REPEAT,     1,   100,   nullptr),
+  PARAM_U32(T3_EARLY_LICK_PUNISH, 0, 1,    nullptr),
   ACTION(TARE, doTare),
 };
 static const size_t CMD_COUNT = sizeof(CMD_TABLE) / sizeof(CMD_TABLE[0]);
@@ -174,15 +204,25 @@ static Inputs sense() {
   if (sw.getState()) in.levels |= LV_IN_POSITION;
 
   // --- buzzer ------------------------------------------------------------
-  // update() returns "still sounding", so its falling edge is the note ending.
-  // The buzzer is serviced here rather than in act() because that edge is an
-  // input to the task, not an output from it. The note's ONSET is reported from
-  // act(), where the frequency is known; here we only report the return to
-  // silence, which closes the TONE state.
-  bool toneNow = buzzer.update();
+  // update() returns "the note or train is still running", so its falling edge
+  // is the end of the whole thing. The buzzer is serviced here rather than in
+  // act() because that edge is an input to the task, not an output from it.
+  //
+  // isPulseOn() is the finer signal: it drops during a train's gaps. Its edges
+  // drive the TONE telemetry, so the log shows the pulse pattern. The FIRST
+  // onset is reported by act() instead, where the exact call instant is known,
+  // which is why act() presets g_pulseOn.
+  bool toneNow  = buzzer.update();
+  bool pulseNow = buzzer.isPulseOn();
+
+  if (g_pulseOn != pulseNow) {
+    Comms::emit(TELEM_TONE, 1, pulseNow ? (float)g_toneFreq : 0.0f, in.now);
+    g_pulseOn = pulseNow;
+  }
+  // Raised after the pulse edge above, so the closing TONE 0 is already on the
+  // wire by the time the task is told the train finished.
   if (g_toneOn && !toneNow) {
     in.events |= EV_TONE_DONE;
-    Comms::emit(TELEM_TONE, 1, 0.0f, in.now);
     g_toneOn = false;
   }
   if (toneNow) in.levels |= LV_TONE_ON;
@@ -259,7 +299,21 @@ static void act(const ActionQueue &q, uint32_t now) {
         // Opens the TONE state at the frequency requested. sense() closes it
         // with a 0 when the note finishes.
         Comms::emit(TELEM_TONE, 1, (float)a.a0, now);
-        g_toneOn = true;
+        g_toneFreq = a.a0;
+        g_toneOn   = true;
+        g_pulseOn  = true;
+        break;
+
+      case ACT_TONE_TRAIN:
+        // The pulse shape comes from the tunables rather than from the Action,
+        // which carries only two arguments. tasks.cpp computes the train's
+        // total length from these same three values to arm its own timeout, so
+        // there is one definition of the pattern, not two.
+        buzzer.playTrain(a.a0, T3_PULSE_MS, T3_GAP_MS, (uint8_t)T3_N_PULSES);
+        Comms::emit(TELEM_TONE, 1, (float)a.a0, now);
+        g_toneFreq = a.a0;
+        g_toneOn   = true;
+        g_pulseOn  = true;   // the first pulse is already sounding
         break;
     }
   }
@@ -284,10 +338,11 @@ static void serviceTask(uint32_t now) {
   }
 
   buzzer.stop();                  // never carry a note across a boundary
-  if (g_toneOn) {                 // close the TONE state here rather than let
+  if (g_pulseOn) {                // close the TONE state here rather than let
     Comms::emit(TELEM_TONE, 1, 0.0f, now);   // sense() report it, so the
-    g_toneOn = false;                        // incoming task sees no stray
+    g_pulseOn = false;                       // incoming task sees no stray
   }                                          // EV_TONE_DONE on its first cycle
+  g_toneOn = false;
   g_task       = next;
   g_activeTask = TASK;
   g_task->reset(now);
@@ -343,7 +398,8 @@ void loop() {
   Inputs in = sense();       // 1. SENSE
   supervise(in);             //    safety interlocks, unconditionally
 
-  uint32_t before = g_task->transitions();
+  uint32_t before  = g_task->transitions();
+  uint32_t trialsB = g_task->trial();
   g_actions.clear();
   g_task->step(in, g_actions);                               // 2. DECIDE
 
@@ -352,6 +408,12 @@ void loop() {
   // the same state is still recorded.
   if (g_task->transitions() != before)
     Comms::emit(TELEM_STATE, g_task->state(), (float)g_task->trial(), in.now);
+
+  // A trial just closed, so say how it ended. Watching the counter means the
+  // sketch needs to know nothing about which task is running or how many ways
+  // it can end -- it just reports the code the task recorded.
+  if (g_task->trial() != trialsB)
+    Comms::emit(TELEM_OUTCOME, g_task->lastOutcome(), (float)g_task->trial(), in.now);
 
   act(g_actions, in.now);                                    // 3. ACT
 

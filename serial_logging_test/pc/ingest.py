@@ -100,6 +100,7 @@ KNOWN_KINDS = {
     "TONE": "S",      # frequency Hz while sounding, 0 when silent
     "TASK": "S",      # id of the running task
     "STATE": "E",     # state entered; channel = state index
+    "OUTCOME": "E",   # trial ended; channel = OUTCOME_* code
 }
 
 # Learned from "#DEF" lines at runtime; takes precedence over KNOWN_KINDS.

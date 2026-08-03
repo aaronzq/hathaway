@@ -23,6 +23,8 @@ void Task::reset(uint32_t now) {
   abortMask_    = 0;
   abortTarget_  = STAY;
   trial_        = 0;
+  lastOutcome_  = OUTCOME_HIT;
+  for (uint8_t i = 0; i < OUTCOME_COUNT; i++) outcomes_[i] = 0;
   entered_      = false;   // onEntry(initial state) runs on the next step()
 }
 

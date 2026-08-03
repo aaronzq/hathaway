@@ -122,6 +122,92 @@ private:
 
 
 // ===========================================================================
+//  TASK 3 -- two-tone discrimination with a delay, gated by position
+//
+//  The animal hears one of two tones, holds it across a silent delay, and then
+//  reports which it was by licking one of the two spouts after a go cue.
+//
+//  TRIAL TYPE. Drawn on arrival at the port: type 1 (T3_SAMPLE_FREQ1, correct
+//  answer = spout 1) or type 2 (T3_SAMPLE_FREQ2, correct answer = spout 2), at
+//  even odds -- except that the same type cannot run more than T3_MAX_REPEAT
+//  times in a row, so an animal cannot do well by always licking one side. The
+//  draw comes from task_rand32(), which the sketch backs with the hardware RNG
+//  and the host test backs with a scripted sequence.
+//
+//  The names here are 1 and 2 throughout, never "left" and "right": the mapping
+//  from spout number to physical side is a property of the rig, not of the code,
+//  and writing it down twice is how the two come to disagree.
+//
+//  EARLY LICKS. T3_EARLY_LICK_PUNISH decides what a lick during the sample or
+//  the delay means. Set (the default), it replays the trial: the machine returns
+//  to this trial's SAMPLE state and starts the tone again, with the SAME trial
+//  type, so the animal cannot resample its way onto an easier trial. Clear, the
+//  lick is logged and otherwise ignored. Licks during the 100 ms go cue are
+//  always ignored -- the cue is the signal to respond, so a lick there is early
+//  by milliseconds, not a strategy.
+//
+//  OUTCOMES. Exactly one per completed trial, counted on entry to ITI:
+//    HIT          lick on the correct spout inside the response window
+//    INCORRECT    lick on the other spout        -> T3_PUNISH_MS timeout
+//    NO_RESPONSE  the window closed unanswered, OR the animal left the port
+//                 after the go cue without answering
+//    ABORT        the animal left the port before the go cue
+//  Every one of them then serves T3_ITI_MS, aborts included.
+//
+//  Water uses REWARD_DURATION1 / REWARD_DURATION2 -- the same valve times as
+//  every other task. There is deliberately no task-3 override: how long a spout
+//  must open for a given volume is a fact about that spout's plumbing.
+//
+//      IDLE      --in position--> SAMPLE1 | SAMPLE2  (draw the trial type)
+//      SAMPLEn   --train over-->  DELAY
+//      DELAY     --T3_DELAY_MS--> GOCUE
+//      GOCUE     --T3_CUE_DUR-->  RESPONSE
+//      RESPONSE  --correct-->     REWARD  (water) --T3_CONSUME_MS--> ITI
+//      RESPONSE  --wrong-->       PUNISH  --T3_PUNISH_MS-->          ITI
+//      RESPONSE  --window shut, or left the port-->                  ITI
+//      SAMPLEn | DELAY  --lick, if T3_EARLY_LICK_PUNISH--> SAMPLEn (replay)
+//      SAMPLEn | DELAY | GOCUE  --out of position-->       ITI (abort)
+//      ITI       --T3_ITI_MS-->   IDLE
+// ===========================================================================
+
+enum : uint8_t {
+  T3_IDLE = 0,
+  T3_SAMPLE1,
+  T3_SAMPLE2,
+  T3_DELAY,
+  T3_GOCUE,
+  T3_RESPONSE,
+  T3_REWARD,
+  T3_PUNISH,
+  T3_ITI,
+  T3_STATE_COUNT,
+};
+
+class DiscriminationTask : public Task {
+public:
+  const char *name() const override { return "DISCRIMINATION"; }
+  uint8_t     stateCount() const override { return T3_STATE_COUNT; }
+  const char *stateName(uint8_t s) const override;
+  bool        safeToSwitch() const override { return state() == T3_IDLE; }
+  void        reset(uint32_t now) override;   // also clears the repeat history
+
+protected:
+  uint8_t onEvent(uint8_t s, const Inputs &in, ActionQueue &out) override;
+  void    onEntry(uint8_t s, const Inputs &in, ActionQueue &out) override;
+
+private:
+  void     selectType();                  // draw this trial's type, honouring the cap
+  uint8_t  sampleState() const;           // the SAMPLE state for type_
+  uint32_t trainMs() const;               // total length of the sample tone train
+
+  uint8_t type_       = 1;   // trial type of the trial in progress (1 or 2)
+  uint8_t lastType_   = 0;   // type of the previous trial (0 = none yet)
+  uint8_t runLen_     = 0;   // how many trials in a row have been lastType_
+  uint8_t pending_    = OUTCOME_ABORT;   // outcome to book when ITI is entered
+};
+
+
+// ===========================================================================
 //  REGISTRATION
 //
 //  One row per task. The id is what "SET TASK <id>" selects; the objects have

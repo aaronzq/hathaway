@@ -16,6 +16,27 @@ extern unsigned long T2_CUE_DUR;
 extern unsigned long T2_CUE_TO_WATER;
 extern unsigned long T2_N1;
 extern unsigned long T2_N2;
+extern unsigned long T3_SAMPLE_FREQ1;
+extern unsigned long T3_SAMPLE_FREQ2;
+extern unsigned long T3_PULSE_MS;
+extern unsigned long T3_GAP_MS;
+extern unsigned long T3_N_PULSES;
+extern unsigned long T3_DELAY_MS;
+extern unsigned long T3_CUE_FREQ;
+extern unsigned long T3_CUE_DUR;
+extern unsigned long T3_RESPONSE_MS;
+extern unsigned long T3_CONSUME_MS;
+extern unsigned long T3_PUNISH_MS;
+extern unsigned long T3_ITI_MS;
+extern unsigned long T3_MAX_REPEAT;
+extern unsigned long T3_EARLY_LICK_PUNISH;
+
+// The one thing task 3 needs that is not a tunable and not in Inputs: a random
+// draw for the trial type. Declared here, defined by whoever is hosting the
+// task layer -- esp_random() on the firmware (behavior_task.h), a scripted
+// sequence in tools/task_test.cpp. That indirection is what keeps this file
+// hardware-free and keeps the trial sequence exactly reproducible under test.
+extern uint32_t task_rand32();
 
 
 // ===========================================================================
@@ -54,7 +75,9 @@ uint8_t LickRewardTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
       // has no lick transition. That is the whole implementation of "the gate
       // is closed".
       if (in.has(EV_TIMEOUT)) {
-        countTrial();
+        // A task-1 trial exists only because water was delivered, so there is
+        // no other outcome it could have.
+        countTrial(OUTCOME_HIT);
         return T1_ARMED;
       }
       return STAY;
@@ -140,7 +163,7 @@ uint8_t CuedRewardTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
       if (side_ != 0 && in.has(side_ == 1 ? EV_LICK1 : EV_LICK2)) {
         out.push(ACT_REWARD, side_, 0);   // 0 = that spout's own REWARD_DURATION
         interval_ = (side_ == 1) ? REWARD_INTERVAL1 : REWARD_INTERVAL2;
-        countTrial();
+        countTrial(OUTCOME_HIT);          // as in task 1: no other outcome exists
         advanceBlock();                   // may flip side_, so read it above
         return T2_REFRACTORY;
       }
@@ -173,15 +196,220 @@ void CuedRewardTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) {
 
 
 // ===========================================================================
+//  TASK 3 -- two-tone discrimination with a delay, gated by position
+// ===========================================================================
+
+const char *DiscriminationTask::stateName(uint8_t s) const {
+  switch (s) {
+    case T3_IDLE:     return "IDLE";
+    case T3_SAMPLE1:  return "SAMPLE1";
+    case T3_SAMPLE2:  return "SAMPLE2";
+    case T3_DELAY:    return "DELAY";
+    case T3_GOCUE:    return "GOCUE";
+    case T3_RESPONSE: return "RESPONSE";
+    case T3_REWARD:   return "REWARD";
+    case T3_PUNISH:   return "PUNISH";
+    case T3_ITI:      return "ITI";
+    default:          return "?";
+  }
+}
+
+void DiscriminationTask::reset(uint32_t now) {
+  Task::reset(now);
+  type_     = 1;
+  lastType_ = 0;      // no history, so the first draw is never forced
+  runLen_   = 0;
+  pending_  = OUTCOME_ABORT;
+}
+
+uint8_t DiscriminationTask::sampleState() const {
+  return (type_ == 1) ? T3_SAMPLE1 : T3_SAMPLE2;
+}
+
+// nPulses pulses with a gap between each pair, and no trailing gap. The same
+// arithmetic BuzzerHandler::playTrain() does, so the task's timeout expires at
+// the moment the train ends without either side waiting on the other.
+uint32_t DiscriminationTask::trainMs() const {
+  if (T3_N_PULSES == 0) return 0;
+  return T3_N_PULSES * T3_PULSE_MS + (T3_N_PULSES - 1) * T3_GAP_MS;
+}
+
+// Even odds, except that T3_MAX_REPEAT identical trials in a row force the
+// other type next. Without the cap a fair coin still produces long runs, and an
+// animal that has just been rewarded four times on spout 1 learns the wrong
+// lesson from the fifth.
+void DiscriminationTask::selectType() {
+  uint8_t t = (task_rand32() & 1u) ? 2 : 1;
+
+  if (t == lastType_ && runLen_ >= T3_MAX_REPEAT) {
+    t = (t == 1) ? 2 : 1;                 // the cap overrides the draw
+  }
+
+  if (t == lastType_) {
+    runLen_++;
+  } else {
+    lastType_ = t;
+    runLen_   = 1;
+  }
+  type_ = t;
+}
+
+uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
+  const bool licked = in.has(EV_LICK1) || in.has(EV_LICK2);
+
+  // Everything up to and including the go cue requires the animal to stay at
+  // the port: leaving is an abort. Tested on the LEVEL rather than on
+  // EV_SWITCH_OFF for the same reason as task 2 -- an edge seen on a cycle the
+  // task was not looking would otherwise leave the trial running with nobody
+  // at the port. Checked before anything else so that a lick arriving on the
+  // very cycle the animal leaves cannot replay a trial it has walked out of.
+  switch (s) {
+    case T3_SAMPLE1:
+    case T3_SAMPLE2:
+    case T3_DELAY:
+    case T3_GOCUE:
+      if (!in.level(LV_IN_POSITION)) {
+        pending_ = OUTCOME_ABORT;
+        return T3_ITI;
+      }
+      break;
+    default:
+      break;
+  }
+
+  switch (s) {
+    case T3_IDLE:
+      // The draw happens here, not in onEntry, because it decides WHICH state
+      // is entered next. (Task 2's selectSide() can live in onEntry because
+      // there the side does not change the state.)
+      if (in.level(LV_IN_POSITION)) {
+        selectType();
+        return sampleState();
+      }
+      return STAY;
+
+    case T3_SAMPLE1:
+    case T3_SAMPLE2:
+      // Returning s re-enters this state rather than staying in it: the tone
+      // restarts and the timer is rearmed. Same trial type, so a resample
+      // cannot be used to fish for an easier trial.
+      if (licked && T3_EARLY_LICK_PUNISH) return s;
+      if (in.has(EV_TIMEOUT)) return T3_DELAY;
+      return STAY;
+
+    case T3_DELAY:
+      // Replays from the sample, not from the delay: the animal has to hear the
+      // tone again, which is the point of the punishment.
+      if (licked && T3_EARLY_LICK_PUNISH) return sampleState();
+      if (in.has(EV_TIMEOUT)) return T3_GOCUE;
+      return STAY;
+
+    case T3_GOCUE:
+      // No lick transition. The cue IS the signal to respond, so a lick during
+      // its 100 ms is early by a rounding error rather than by strategy; it is
+      // logged by the sketch and changes nothing.
+      if (in.has(EV_TIMEOUT)) return T3_RESPONSE;
+      return STAY;
+
+    case T3_RESPONSE: {
+      const uint32_t correct = (type_ == 1) ? EV_LICK1 : EV_LICK2;
+      const uint32_t wrong   = (type_ == 1) ? EV_LICK2 : EV_LICK1;
+
+      // Correct first, so that licking both spouts on one cycle is scored as a
+      // hit rather than resolved by bit order. Arbitrary but fixed, exactly as
+      // in task 1: the alternative is an irreproducible once-a-week bug.
+      if (in.has(correct)) {
+        out.push(ACT_REWARD, type_, 0);   // 0 = that spout's own REWARD_DURATION
+        pending_ = OUTCOME_HIT;
+        return T3_REWARD;
+      }
+      if (in.has(wrong)) {
+        pending_ = OUTCOME_INCORRECT;
+        return T3_PUNISH;
+      }
+      // The window closing and the animal walking off are the same thing here:
+      // the trial was asked and not answered.
+      if (in.has(EV_TIMEOUT) || !in.level(LV_IN_POSITION)) {
+        pending_ = OUTCOME_NO_RESPONSE;
+        return T3_ITI;
+      }
+      return STAY;
+    }
+
+    case T3_REWARD:
+      // Not gated on position: the animal has earned the water and may drink it
+      // however it likes.
+      if (in.has(EV_TIMEOUT)) return T3_ITI;
+      return STAY;
+
+    case T3_PUNISH:
+      // Also ungated -- a timeout the animal could end by stepping away would
+      // not be a timeout.
+      if (in.has(EV_TIMEOUT)) return T3_ITI;
+      return STAY;
+
+    case T3_ITI:
+      if (in.has(EV_TIMEOUT)) return T3_IDLE;
+      return STAY;
+  }
+  return STAY;
+}
+
+void DiscriminationTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) {
+  (void)in;
+  switch (s) {
+    case T3_SAMPLE1:
+      out.push(ACT_TONE_TRAIN, T3_SAMPLE_FREQ1);
+      setTimeout(trainMs());
+      break;
+    case T3_SAMPLE2:
+      out.push(ACT_TONE_TRAIN, T3_SAMPLE_FREQ2);
+      setTimeout(trainMs());
+      break;
+    case T3_DELAY:
+      setTimeout(T3_DELAY_MS);
+      break;
+    case T3_GOCUE:
+      out.push(ACT_TONE, T3_CUE_FREQ, T3_CUE_DUR);
+      setTimeout(T3_CUE_DUR);
+      break;
+    case T3_RESPONSE:
+      setTimeout(T3_RESPONSE_MS);
+      break;
+    case T3_REWARD:
+      // Measured from the moment the valve is asked to open, not from when it
+      // shuts: the consumption period is time at the spout, and REWARD_DURATIONn
+      // is a fraction of it.
+      setTimeout(T3_CONSUME_MS);
+      break;
+    case T3_PUNISH:
+      setTimeout(T3_PUNISH_MS);
+      break;
+    case T3_ITI:
+      // The single place a task-3 trial is booked. Every route out of a trial
+      // passes through here, which is what makes the four outcome counts add up
+      // to trial() by construction rather than by inspection.
+      countTrial(pending_);
+      setTimeout(T3_ITI_MS);
+      break;
+    default:
+      break;
+  }
+}
+
+
+// ===========================================================================
 //  REGISTRATION
 // ===========================================================================
 
-static LickRewardTask g_task1;
-static CuedRewardTask g_task2;
+static LickRewardTask     g_task1;
+static CuedRewardTask     g_task2;
+static DiscriminationTask g_task3;
 
 static const TaskSpec TASK_TABLE[] = {
   { 1, &g_task1 },
   { 2, &g_task2 },
+  { 3, &g_task3 },
 };
 static const uint8_t TASK_TABLE_N = sizeof(TASK_TABLE) / sizeof(TASK_TABLE[0]);
 
