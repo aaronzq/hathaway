@@ -5,7 +5,7 @@
 
 #define DEFAULT_NOTE_DURATION 150 //default note duration in ms
 #define FREQ 1000 // init Freq
-#define PWM_RESOLUTION 8   // LEDC duty-cycle resolution in bits (0-255)
+#define PWM_RESOLUTION 10  // LEDC duty-cycle resolution in bits; ledcWriteTone() forces 10-bit
 
 
 class BuzzerHandler {

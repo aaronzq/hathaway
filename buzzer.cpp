@@ -18,8 +18,10 @@ BuzzerHandler::BuzzerHandler(int pin)
 // The two places sound is turned on and off, so the duty cycle and the pulseOn
 // flag can never drift apart.
 void BuzzerHandler::soundOn() {
+    // ledcWriteTone() sets the frequency and a 50% duty in one call, so no
+    // separate ledcWrite: it would be read against the 10-bit period the tone
+    // call installs, not PWM_RESOLUTION, and give 12.5% instead of 50%.
     ledcWriteTone(buzzerPin, trainFreq);
-    ledcWrite(buzzerPin, 1 << (PWM_RESOLUTION - 1));
     pulseOn = true;
 }
 
