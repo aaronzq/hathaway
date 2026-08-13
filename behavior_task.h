@@ -35,6 +35,9 @@ unsigned long REWARD_DURATION2 = 42;    // spout 2 solenoid open time, ms
 unsigned long REWARD_INTERVAL1 = 3000;  // refractory after a spout-1 reward, ms
 unsigned long REWARD_INTERVAL2 = 3000;  // refractory after a spout-2 reward, ms
 unsigned long MAG_FIX_DURATION = 5000;
+// Load-cell halts are ignored for this long after the magnet turns on, ms.
+// Keep it well below MAG_FIX_DURATION or the early release never happens.
+unsigned long MAG_GRACE_MS = 0;
 float SCALE_HIGH_THRESH = 40.0;
 float SCALE_LOW_THRESH  = 10.0;
 

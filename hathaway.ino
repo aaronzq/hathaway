@@ -116,6 +116,7 @@ static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 static void applyRewardDuration1(float v) { rewarder1.setRewardDuration((unsigned long)v); }
 static void applyRewardDuration2(float v) { rewarder2.setRewardDuration((unsigned long)v); }
 static void applyMagFixDuration(float v)  { magnet.setFixDuration((unsigned long)v); }
+static void applyMagGrace(float v)        { magnet.setGraceDuration((unsigned long)v); }
 static void doTare(float)                 { scale.tare(); }   // blocks ~1 s
 
 static const CmdSpec CMD_TABLE[] = {
@@ -124,6 +125,7 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(REWARD_INTERVAL1,  0,   60000, nullptr),
   PARAM_U32(REWARD_INTERVAL2,  0,   60000, nullptr),
   PARAM_U32(MAG_FIX_DURATION,  0,   60000, applyMagFixDuration),
+  PARAM_U32(MAG_GRACE_MS,      0,   60000, applyMagGrace),
   PARAM_F32(SCALE_HIGH_THRESH, -50, 50,    nullptr),
   PARAM_F32(SCALE_LOW_THRESH,  -50, 50,    nullptr),
   // TASK is applied lazily, at the next trial boundary -- see serviceTask().
@@ -263,7 +265,7 @@ static Inputs sense() {
 // ===========================================================================
 
 static void supervise(const Inputs &in) {
-  if (in.has(EV_WEIGHT_HI) || in.has(EV_WEIGHT_LO)) magnet.halt();
+  if ((in.has(EV_WEIGHT_HI) || in.has(EV_WEIGHT_LO)) && magnet.haltAllowed()) magnet.halt();
 }
 
 
@@ -362,6 +364,7 @@ void setup() {
   rewarder2 = Rewarder(SPOUT2_PIN, REWARD_DURATION2);
   sw        = SwitchHandler(SWITCH_PIN);
   magnet    = Magneto(MAGNET_PIN, MAG_FIX_DURATION);
+  magnet.setGraceDuration(MAG_GRACE_MS);
 
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
   scale.set_scale();
