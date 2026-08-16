@@ -10,7 +10,7 @@ BuzzerHandler::BuzzerHandler()
 BuzzerHandler::BuzzerHandler(int pin)
     : buzzerPin(pin), noteDuration(DEFAULT_NOTE_DURATION),
       isPlaying(false), closeTime(0) {
-    ledcAttach(buzzerPin, FREQ, PWM_RESOLUTION);
+    ledcAttach(buzzerPin, FREQ, 10);  // 10 bits: must match ledcWriteTone(), see buzzer.h
     ledcWrite(buzzerPin, 0); // output low (pwm: 0%), mute
 }
 
@@ -18,10 +18,21 @@ BuzzerHandler::BuzzerHandler(int pin)
 // The two places sound is turned on and off, so the duty cycle and the pulseOn
 // flag can never drift apart.
 void BuzzerHandler::soundOn() {
-    // ledcWriteTone() sets the frequency and a 50% duty in one call, so no
-    // separate ledcWrite: it would be read against the 10-bit period the tone
-    // call installs, not PWM_RESOLUTION, and give 12.5% instead of 50%.
-    ledcWriteTone(buzzerPin, trainFreq);
+    // ledcWriteTone() sets the frequency and a 50% duty in one call, so at the
+    // default width it is the whole job and no second write happens at all.
+    // Off 50%, ledcWrite() overrides the duty; it is scaled by 1024 because the
+    // tone call just installed a 10-bit period (see buzzer.h).
+    if (pulseWidthPct == 0) {
+        // Skip the tone call entirely: it would sound at 50% for the microsecond
+        // before the duty write landed. pulseOn still goes true, so a silent
+        // pulse logs and times exactly like an audible one.
+        ledcWrite(buzzerPin, 0);
+    } else {
+        ledcWriteTone(buzzerPin, trainFreq);
+        if (pulseWidthPct != 50) {
+            ledcWrite(buzzerPin, (1024u * pulseWidthPct) / 100);
+        }
+    }
     pulseOn = true;
 }
 
@@ -71,6 +82,10 @@ void BuzzerHandler::stop() {
     isPlaying  = false;
     isTrain    = false;
     pulsesLeft = 0;
+}
+
+void BuzzerHandler::setPulseWidth(uint8_t pct) {
+    pulseWidthPct = (pct > 100) ? 100 : pct;
 }
 
 bool BuzzerHandler::update() {

@@ -3,9 +3,17 @@
 #include <Arduino.h>
 
 
+// EVERYTHING IN THIS FILE ASSUMES A 10-BIT LEDC PERIOD (duty 0..1024).
+// That is not a choice: ledcWriteTone() installs 10-bit resolution itself, and
+// any ledcWrite() afterwards is read against that period. There is no constant
+// to change -- ledcAttach() below is passed a literal 10 to match, and duty
+// percentages are scaled by 1024. Using some other resolution silently rescales
+// every duty cycle (an 8-bit value written against the tone call's 10-bit
+// period gives 12.5% where 50% was meant).
+
 #define DEFAULT_NOTE_DURATION 150 //default note duration in ms
 #define FREQ 1000 // init Freq
-#define PWM_RESOLUTION 10  // LEDC duty-cycle resolution in bits; ledcWriteTone() forces 10-bit
+#define DEFAULT_PULSE_WIDTH 50  // PWM duty cycle, percent
 
 
 class BuzzerHandler {
@@ -30,6 +38,11 @@ public:
     // Silence immediately, whatever was playing. Used when switching tasks so a
     // note can never be left sounding across a task boundary.
     void stop();
+
+    // Duty cycle in percent, 0..100. Applies from the next pulse onward, so a
+    // change mid-train takes effect on the following pulse. 0 is silence that
+    // still logs and still ends with EV_TONE_DONE -- a silent control trial.
+    void setPulseWidth(uint8_t pct);
 
     // Returns true while a note or a WHOLE train is still running -- for a
     // train it stays true across the silent gaps. The control loop watches the
@@ -57,6 +70,7 @@ private:
     unsigned long gapMs      = 0;
     unsigned long phaseEnd   = 0;       // when the current pulse or gap ends
     uint8_t       pulsesLeft = 0;       // pulses not yet started
+    uint8_t       pulseWidthPct = DEFAULT_PULSE_WIDTH;
 
     void soundOn();
     void soundOff();
