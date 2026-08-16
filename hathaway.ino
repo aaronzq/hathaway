@@ -117,6 +117,7 @@ static void applyRewardDuration1(float v) { rewarder1.setRewardDuration((unsigne
 static void applyRewardDuration2(float v) { rewarder2.setRewardDuration((unsigned long)v); }
 static void applyMagFixDuration(float v)  { magnet.setFixDuration((unsigned long)v); }
 static void applyMagGrace(float v)        { magnet.setGraceDuration((unsigned long)v); }
+static void applyBuzPulseWidth(float v)   { buzzer.setPulseWidth((uint8_t)v); }
 static void doTare(float)                 { scale.tare(); }   // blocks ~1 s
 
 static const CmdSpec CMD_TABLE[] = {
@@ -126,6 +127,7 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(REWARD_INTERVAL2,  0,   60000, nullptr),
   PARAM_U32(MAG_FIX_DURATION,  0,   60000, applyMagFixDuration),
   PARAM_U32(MAG_GRACE_MS,      0,   60000, applyMagGrace),
+  PARAM_U32(BUZ_PULSE_WIDTH,   0,   100,   applyBuzPulseWidth),
   PARAM_F32(SCALE_HIGH_THRESH, -50, 50,    nullptr),
   PARAM_F32(SCALE_LOW_THRESH,  -50, 50,    nullptr),
   // TASK is applied lazily, at the next trial boundary -- see serviceTask().
@@ -158,6 +160,8 @@ static const CmdSpec CMD_TABLE[] = {
   // 1 = strict alternation. Zero is excluded: it would force the type to flip
   // on every trial AND on itself, which is just alternation with a worse name.
   PARAM_U32(T3_MAX_REPEAT,     1,   100,   nullptr),
+  // Manual anti-bias override: 0 off, 1 or 2 forces every trial to that type.
+  PARAM_U32(T3_ANTI_BIAS_FORCE, 0,  2,     nullptr),
   PARAM_U32(T3_EARLY_LICK_PUNISH, 0, 1,    nullptr),
   ACTION(TARE, doTare),
 };
@@ -358,6 +362,7 @@ static void serviceTask(uint32_t now) {
 
 void setup() {
   buzzer    = BuzzerHandler(BUZZER_PIN);
+  buzzer.setPulseWidth((uint8_t)BUZ_PULSE_WIDTH);
   lick1     = LickHandler(LICK1_PIN);
   lick2     = LickHandler(LICK2_PIN);
   rewarder1 = Rewarder(SPOUT1_PIN, REWARD_DURATION1);

@@ -39,6 +39,7 @@ unsigned long T3_CONSUME_MS    = 1500;
 unsigned long T3_PUNISH_MS     = 2000;
 unsigned long T3_ITI_MS        = 250;
 unsigned long T3_MAX_REPEAT    = 3;
+unsigned long T3_ANTI_BIAS_FORCE = 0;
 unsigned long T3_EARLY_LICK_PUNISH = 1;
 
 // The random source task 3 draws its trial type from. On the firmware this is
@@ -585,6 +586,76 @@ static void test_task3_repeat_cap() {
   check(h.task()->outcomeCount(OUTCOME_HIT) == 8, "and all eight booked as hits");
 }
 
+static void test_task3_anti_bias_force() {
+  printf("task 3: T3_ANTI_BIAS_FORCE pins every trial to one type\n");
+  setRand({0});                            // a coin stuck on type 1
+
+  T3_ANTI_BIAS_FORCE = 2;                  // ... and an operator overruling it
+  Harness h(taskById(3));
+  for (int i = 0; i < 8; i++) runHitTrial(h);
+  check(sampleSeq(h.trace()) == "22222222",
+        "force = 2 beats the draw, and keeps beating T3_MAX_REPEAT past 3 in a row");
+
+  T3_ANTI_BIAS_FORCE = 1;                  // switch the drill to the other side
+  h.clearTrace();
+  for (int i = 0; i < 4; i++) runHitTrial(h);
+  check(sampleSeq(h.trace()) == "1111", "force = 1 switches the drill at once");
+
+  T3_ANTI_BIAS_FORCE = 0;
+}
+
+static void test_task3_force_release_flips_once() {
+  printf("task 3: the first free trial after a release is the other type\n");
+  setRand({0});                            // the coin would say type 1 every time
+  T3_ANTI_BIAS_FORCE = 1;
+
+  Harness h(taskById(3));
+  for (int i = 0; i < 6; i++) runHitTrial(h);   // six forced type-1 trials
+
+  T3_ANTI_BIAS_FORCE = 0;                  // release
+  h.clearTrace();
+  for (int i = 0; i < 5; i++) runHitTrial(h);
+
+  // Forced trials count towards the run history, so runLen_ is well over the cap
+  // and the coin is overruled once. Then normal capped behaviour resumes: with
+  // this rigged coin that is three type 1s and a forced type 2.
+  check(sampleSeq(h.trace()) == "21112",
+        "one forced flip on release, then the usual capped sequence");
+
+  T3_ANTI_BIAS_FORCE = 0;
+}
+
+static void test_task3_force_survives_a_long_block() {
+  printf("task 3: a forced block longer than a uint8_t still flips on release\n");
+  setRand({0});
+  T3_ANTI_BIAS_FORCE = 2;
+
+  Harness h(taskById(3));
+  // 300 trials: past 255, where an unclamped run counter would wrap to 0 and
+  // silently lose the cap at exactly the moment it is wanted.
+  for (int i = 0; i < 300; i++) runHitTrial(h);
+  check(sampleSeq(h.trace()).find('1') == std::string::npos,
+        "300 forced trials, not one of them the other type");
+
+  T3_ANTI_BIAS_FORCE = 0;
+  h.clearTrace();
+  runHitTrial(h);
+  check(sampleSeq(h.trace()) == "1", "and the release still flips, so runLen_ did not wrap");
+}
+
+static void test_task3_force_out_of_range_is_ignored() {
+  printf("task 3: an out-of-range force falls back to the normal draw\n");
+  setRand({0});
+  T3_ANTI_BIAS_FORCE = 7;                  // CMD_TABLE rejects this; belt and braces
+
+  Harness h(taskById(3));
+  for (int i = 0; i < 8; i++) runHitTrial(h);
+  check(sampleSeq(h.trace()) == "11121112",
+        "the ordinary capped sequence, exactly as if the force were off");
+
+  T3_ANTI_BIAS_FORCE = 0;
+}
+
 static void test_task3_type2_maps_to_spout2() {
   printf("task 3: trial type 2 plays its own tone and is answered on spout 2\n");
   setRand({1});                            // bit 0 set = trial type 2
@@ -766,6 +837,10 @@ int main() {
   test_task3_early_lick_replays();
   test_task3_early_lick_tolerated();
   test_task3_repeat_cap();
+  test_task3_anti_bias_force();
+  test_task3_force_release_flips_once();
+  test_task3_force_survives_a_long_block();
+  test_task3_force_out_of_range_is_ignored();
   test_task3_type2_maps_to_spout2();
   test_task3_simultaneous_licks_score_a_hit();
   test_task3_outcomes_account_for_every_trial();

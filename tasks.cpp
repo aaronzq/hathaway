@@ -29,6 +29,7 @@ extern unsigned long T3_CONSUME_MS;
 extern unsigned long T3_PUNISH_MS;
 extern unsigned long T3_ITI_MS;
 extern unsigned long T3_MAX_REPEAT;
+extern unsigned long T3_ANTI_BIAS_FORCE;
 extern unsigned long T3_EARLY_LICK_PUNISH;
 
 // The one thing task 3 needs that is not a tunable and not in Inputs: a random
@@ -238,15 +239,38 @@ uint32_t DiscriminationTask::trainMs() const {
 // other type next. Without the cap a fair coin still produces long runs, and an
 // animal that has just been rewarded four times on spout 1 learns the wrong
 // lesson from the fifth.
+//
+// T3_ANTI_BIAS_FORCE is the manual override of all of that: set it to 1 or 2 and
+// every trial is that type until it is set back to 0. It is the operator's tool
+// for an animal that has learned to answer one side -- watch the outcome pie go
+// lopsided, drill the neglected type for a while, then release it.
+//
+// The forced trials DO count towards the run history, so a long forced block
+// leaves runLen_ well over the cap and the first free trial after the release is
+// forced to the other type. That is deliberate: it stops the coin handing the
+// animal yet another trial of the type it has just been drilled on.
 void DiscriminationTask::selectType() {
-  uint8_t t = (task_rand32() & 1u) ? 2 : 1;
+  uint8_t t;
 
-  if (t == lastType_ && runLen_ >= T3_MAX_REPEAT) {
-    t = (t == 1) ? 2 : 1;                 // the cap overrides the draw
+  if (T3_ANTI_BIAS_FORCE == 1 || T3_ANTI_BIAS_FORCE == 2) {
+    // No draw at all while forced -- both so the scripted RNG in the host test
+    // stays in step, and because a discarded random number invites the reader to
+    // wonder whether it was meant to be used. Any value outside {1,2} falls
+    // through to the normal path, so a bad setting degrades to ordinary
+    // behaviour rather than to a task stuck on one side.
+    t = (uint8_t)T3_ANTI_BIAS_FORCE;
+  } else {
+    t = (task_rand32() & 1u) ? 2 : 1;
+    if (t == lastType_ && runLen_ >= T3_MAX_REPEAT) {
+      t = (t == 1) ? 2 : 1;               // the cap overrides the draw
+    }
   }
 
   if (t == lastType_) {
-    runLen_++;
+    // Clamped: runLen_ is a uint8_t and a forced block can run for hundreds of
+    // trials. Left to wrap it would pass 255, restart at 0 and silently defeat
+    // the cap on release -- the one moment the cap is most wanted.
+    if (runLen_ < 255) runLen_++;
   } else {
     lastType_ = t;
     runLen_   = 1;

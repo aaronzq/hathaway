@@ -34,6 +34,11 @@ unsigned long REWARD_DURATION1 = 50;    // spout 1 solenoid open time, ms
 unsigned long REWARD_DURATION2 = 42;    // spout 2 solenoid open time, ms
 unsigned long REWARD_INTERVAL1 = 3000;  // refractory after a spout-1 reward, ms
 unsigned long REWARD_INTERVAL2 = 3000;  // refractory after a spout-2 reward, ms
+// Buzzer PWM duty cycle, percent. 50 is the plain square wave; away from it the
+// tone gets quieter and reedier without changing pitch. 0 is silence that still
+// logs and still ends with EV_TONE_DONE.
+unsigned long BUZ_PULSE_WIDTH = 50;
+
 unsigned long MAG_FIX_DURATION = 5000;
 // Load-cell halts are ignored for this long after the magnet turns on, ms.
 // Keep it well below MAG_FIX_DURATION or the early release never happens.
@@ -120,6 +125,19 @@ unsigned long T3_ITI_MS      = 250;     // inter-trial interval, ms. Served
 // forced to the other type. 1 gives strict alternation, which is predictable
 // and therefore learnable -- 3 or 4 is the usual choice.
 unsigned long T3_MAX_REPEAT = 3;
+
+// MANUAL anti-bias override, for an animal that has learned to answer one side.
+// 0 = off, the trial type is drawn as usual. 1 or 2 = every trial is that type,
+// overriding both the coin and T3_MAX_REPEAT, until this is set back to 0.
+//
+// Use it when the outcome pie goes lopsided: drill the neglected type for a
+// while, then release. Forced trials still count towards the repeat history, so
+// the first trial after the release is the OTHER type -- the coin cannot hand
+// the animal one more of what it has just been drilled on.
+//
+// Takes effect at the next trial: the type is chosen as the trial leaves IDLE,
+// so changing this mid-trial never rewrites the trial in progress.
+unsigned long T3_ANTI_BIAS_FORCE = 0;
 
 // What a lick during the sample or the delay does. 1 = replay the trial from
 // its sample tone, same trial type. 0 = log the lick and ignore it, which is

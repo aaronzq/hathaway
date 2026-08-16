@@ -134,6 +134,12 @@ private:
 //  draw comes from task_rand32(), which the sketch backs with the hardware RNG
 //  and the host test backs with a scripted sequence.
 //
+//  ANTI-BIAS. Two mechanisms, one automatic and one manual. T3_MAX_REPEAT is the
+//  automatic one above, and runs unattended. T3_ANTI_BIAS_FORCE is the operator's
+//  override: 1 or 2 makes every trial that type, beating both the coin and the
+//  cap, until it is set back to 0. Forced trials still count towards the repeat
+//  history, so the first free trial after a release is the other type.
+//
 //  The names here are 1 and 2 throughout, never "left" and "right": the mapping
 //  from spout number to physical side is a property of the rig, not of the code,
 //  and writing it down twice is how the two come to disagree.
