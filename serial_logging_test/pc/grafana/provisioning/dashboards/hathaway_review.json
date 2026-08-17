@@ -1,73 +1,20 @@
 {
-  "uid": "hathaway-live-rig-monitor",
-  "title": "Hathaway - Live Rig Monitor",
+  "uid": "hathaway-session-review",
+  "title": "Hathaway - Session Review",
   "tags": [
     "hathaway"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 106,
+  "version": 1,
   "editable": true,
   "liveNow": false,
-  "refresh": "500ms",
+  "refresh": "",
   "time": {
-    "from": "now-1h",
+    "from": "now-24h",
     "to": "now"
   },
-  "timepicker": {
-    "refresh_intervals": [
-      "500ms",
-      "1s",
-      "2s",
-      "5s",
-      "10s",
-      "30s",
-      "1m",
-      "5m"
-    ],
-    "quick_ranges": [
-      {
-        "display": "Last 30 seconds",
-        "from": "now-30s",
-        "to": "now"
-      },
-      {
-        "display": "Last 1 minute",
-        "from": "now-1m",
-        "to": "now"
-      },
-      {
-        "display": "Last 2 minutes",
-        "from": "now-2m",
-        "to": "now"
-      },
-      {
-        "display": "Last 5 minutes",
-        "from": "now-5m",
-        "to": "now"
-      },
-      {
-        "display": "Last 15 minutes",
-        "from": "now-15m",
-        "to": "now"
-      },
-      {
-        "display": "Last 1 hour",
-        "from": "now-1h",
-        "to": "now"
-      },
-      {
-        "display": "Last 3 hour",
-        "from": "now-3h",
-        "to": "now"
-      },
-      {
-        "display": "Last 6 hour",
-        "from": "now-6h",
-        "to": "now"
-      }
-    ]
-  },
+  "timepicker": {},
   "annotations": {
     "list": [
       {
@@ -89,13 +36,13 @@
       {
         "name": "rig",
         "label": "Rig",
-        "description": "Rigs that have streamed samples in the last 5 minutes. Falls back to the most recently started rig when nothing is live, so the list is never empty. Re-queried on page load only -- use the 'Rescan rigs' link to pick up a rig that came online since.",
+        "description": "Every rig that has ever logged a session -- not just the live ones, since this dashboard is for looking backwards.",
         "type": "query",
         "datasource": {
           "type": "postgres",
           "uid": "hathaway_pg"
         },
-        "query": "-- \"Active\" = streaming data right now, not \"has an unclosed session row\".\n-- ended_at is only stamped on a clean disconnect, so a killed test run left\n-- its rig in this list forever. Recent samples cannot lie the same way, and\n-- they survive midnight, which a 'today' filter would not.\n--\n-- Cheap despite hitting samples: idx_samples_host_ts plus hypertable chunk\n-- exclusion means only the newest chunk is touched.\n--\n-- The UNION ALL tail is a guard, not a feature. With no rig streaming the\n-- list would be empty, $rig would expand to nothing, 'rig_id = $rig' would\n-- become 'rig_id =' and every panel would show a SQL error instead of just\n-- sitting blank. So fall back to the most recent rig, but ONLY when nothing\n-- is live -- otherwise it would resurrect the stale rig it is meant to hide.\nWITH live AS (\n  SELECT DISTINCT rig_id FROM samples\n   WHERE host_ts > now() - interval '5 minutes'\n)\nSELECT rig_id FROM live\nUNION ALL\nSELECT rig_id FROM (SELECT rig_id FROM sessions ORDER BY session_id DESC LIMIT 1) f\n WHERE NOT EXISTS (SELECT 1 FROM live)\nORDER BY 1",
+        "query": "SELECT DISTINCT rig_id FROM sessions ORDER BY 1",
         "refresh": 1,
         "hide": 0,
         "multi": false,
@@ -107,18 +54,17 @@
         "sort": 3
       },
       {
-        "name": "total_trials",
-        "label": "Trials in current session",
-        "description": "Trials booked in the current session, used to label the outcome pie chart's title. Gated identically to that panel's query, so the number and the slices can never disagree. Hidden: it is a read-out, not a control. refresh 2 = re-query on time-range change, which the dashboard's auto-refresh triggers.",
+        "name": "session",
+        "label": "Session",
+        "description": "Sessions on the selected rig, newest first. __text is what the dropdown shows, __value is the session_id the panels filter on. Chained to $rig, so changing the rig repopulates this list.",
         "type": "query",
         "datasource": {
           "type": "postgres",
           "uid": "hathaway_pg"
         },
-        "query": "SELECT count(*) FROM events_dev, (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d WHERE type = 'OUTCOME' AND session_id = (SELECT max(session_id) FROM sessions WHERE rig_id = $rig) AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles' AND host_ts < (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'",
-        "refresh": 2,
-        "hide": 2,
-        "skipUrlSync": true,
+        "query": "SELECT to_char(started_at AT TIME ZONE 'America/Los_Angeles', 'YYYY-MM-DD HH24:MI')\n       || '   #' || session_id AS __text,\n       session_id               AS __value\n  FROM sessions\n WHERE rig_id = $rig\n ORDER BY session_id DESC",
+        "refresh": 1,
+        "hide": 0,
         "multi": false,
         "includeAll": false,
         "current": {},
@@ -126,28 +72,89 @@
         "allowCustomValue": true,
         "regex": "",
         "sort": 0
+      },
+      {
+        "name": "from_ms",
+        "label": "from_ms",
+        "description": "Epoch ms of the selected session's start, minus 1 s. Feeds the 'Load session' link's from= parameter. Hidden: it is plumbing, not a control.",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "hathaway_pg"
+        },
+        "query": "SELECT (extract(epoch FROM started_at - interval '1 second') * 1000)::bigint\n  FROM sessions WHERE session_id = $session",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {},
+        "options": [],
+        "allowCustomValue": true,
+        "regex": "",
+        "sort": 0
+      },
+      {
+        "name": "to_ms",
+        "label": "to_ms",
+        "description": "Epoch ms of the selected session's end, plus 1 s. Falls back to now() for a session still running, or one whose ingest was killed before it could stamp ended_at.",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "hathaway_pg"
+        },
+        "query": "SELECT (extract(epoch FROM COALESCE(ended_at, now()) + interval '1 second') * 1000)::bigint\n  FROM sessions WHERE session_id = $session",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {},
+        "options": [],
+        "allowCustomValue": true,
+        "regex": "",
+        "sort": 0
+      },
+      {
+        "name": "total_trials",
+        "label": "Trials in selected session",
+        "description": "Trials in the selected session, used to label the outcome pie's title. Gated identically to that panel's query so the number and the slices cannot disagree.",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "hathaway_pg"
+        },
+        "query": "SELECT count(*) FROM events_dev WHERE type = 'OUTCOME' AND session_id = $session",
+        "refresh": 1,
+        "hide": 2,
+        "multi": false,
+        "includeAll": false,
+        "current": {},
+        "options": [],
+        "allowCustomValue": true,
+        "regex": "",
+        "sort": 0,
+        "skipUrlSync": true
       }
     ]
   },
   "links": [
     {
-      "title": "Rescan rigs",
+      "title": "Load selected session",
       "type": "link",
-      "url": "/d/hathaway-live-rig-monitor/",
+      "url": "/d/hathaway-session-review/?var-rig=${rig}&var-session=${session}&from=${from_ms}&to=${to_ms}",
       "icon": "cloud",
-      "tooltip": "Reload the page to re-run the rig lookup",
+      "tooltip": "Snap the time range to the selected session",
       "targetBlank": false,
       "asDropdown": false,
       "includeVars": false,
-      "keepTime": true,
+      "keepTime": false,
       "tags": []
     },
     {
-      "title": "Session review",
+      "title": "Live monitor",
       "type": "link",
-      "url": "/d/hathaway-session-review/",
+      "url": "/d/hathaway-live-rig-monitor/",
       "icon": "external link",
-      "tooltip": "Browse past sessions on an absolute time range",
+      "tooltip": "Back to the live rig monitor",
       "targetBlank": false,
       "asDropdown": false,
       "includeVars": false,
@@ -180,7 +187,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, value AS weight FROM samples_dev WHERE type = 'WEIGHT' AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, value AS weight FROM samples_dev WHERE type = 'WEIGHT' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -283,7 +290,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 1 AS lick1 FROM events_dev WHERE type = 'LICK' AND channel = 1 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 1 AS lick1 FROM events_dev WHERE type = 'LICK' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "B",
@@ -293,7 +300,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 3 AS lick2 FROM events_dev WHERE type = 'LICK' AND channel = 2 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 3 AS lick2 FROM events_dev WHERE type = 'LICK' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "C",
@@ -303,7 +310,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 1.5 AS reward1 FROM events_dev WHERE type = 'REWARD' AND channel = 1 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 1.5 AS reward1 FROM events_dev WHERE type = 'REWARD' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "D",
@@ -313,7 +320,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 3.5 AS reward2 FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 3.5 AS reward2 FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "E",
@@ -324,7 +331,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Outcome rows. All four sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort.\r\n--\r\n-- Kept as four separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "-- Outcome rows. All four sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort.\r\n--\r\n-- Kept as four separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "F",
@@ -335,7 +342,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 5 AS incorrect FROM events_dev WHERE type = 'OUTCOME' AND channel = 1 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 5 AS incorrect FROM events_dev WHERE type = 'OUTCOME' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "G",
@@ -346,7 +353,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 5 AS \"no response\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 2 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 5 AS \"no response\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "H",
@@ -357,7 +364,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 5 AS abort FROM events_dev WHERE type = 'OUTCOME' AND channel = 3 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 5 AS abort FROM events_dev WHERE type = 'OUTCOME' AND channel = 3 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -586,7 +593,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "-- Keeps the 0..1 band; MAGNET and BUZZER are offset above it.\r\n(SELECT $__timeFrom()::timestamptz AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND host_ts < $__timeFrom() ORDER BY t_us DESC LIMIT 1) UNION ALL (SELECT dev_ts AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND $__timeFilter(host_ts)) ORDER BY time"
+          "rawSql": "-- Keeps the 0..1 band; MAGNET and BUZZER are offset above it.\r\n(SELECT $__timeFrom()::timestamptz AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND session_id = $session AND host_ts < $__timeFrom() ORDER BY t_us DESC LIMIT 1) UNION ALL (SELECT dev_ts AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts)) ORDER BY time"
         },
         {
           "refId": "B",
@@ -597,7 +604,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Offset into the 1.5..2.5 band. Stored values are still 0/1.\r\n(SELECT $__timeFrom()::timestamptz AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND host_ts < $__timeFrom()\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND $__timeFilter(host_ts))\r\nORDER BY time"
+          "rawSql": "-- Offset into the 1.5..2.5 band. Stored values are still 0/1.\r\n(SELECT $__timeFrom()::timestamptz AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND session_id = $session AND host_ts < $__timeFrom()\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts))\r\nORDER BY time"
         },
         {
           "refId": "C",
@@ -608,7 +615,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Offset into the 3..4 band: 4 while a note sounds, 3 when silent.\r\n-- (TONE stores the frequency in Hz, so 'sounding' is value > 0.)\r\n--\r\n-- The first branch is the carry-in, same as POSITION and MAGNET above: it\r\n-- looks just before the window, takes the last known state and draws it at\r\n-- the left edge, so the line starts there instead of at the first row inside\r\n-- the window. Bounded to 10 minutes -- unbounded it would reach back days into\r\n-- an earlier session and paint a flat 'silent' line across a window that has\r\n-- no tone data at all.\r\n--\r\n-- Filters are on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks. dev_ts is computed per row, so\r\n-- filtering on it means scanning every chunk on every refresh. dev_ts is still\r\n-- what gets PLOTTED; only the row selection uses host_ts, and the two never\r\n-- differ by more than the serial read cycle.\r\n(SELECT $__timeFrom()::timestamptz AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE'\r\n    AND rig_id = $rig AND host_ts <  $__timeFrom()::timestamptz\r\n    AND host_ts >= $__timeFrom()::timestamptz - interval '10 minutes'\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE' AND rig_id = $rig AND $__timeFilter(host_ts))\r\nORDER BY time"
+          "rawSql": "-- Offset into the 3..4 band: 4 while a note sounds, 3 when silent.\r\n-- (TONE stores the frequency in Hz, so 'sounding' is value > 0.)\r\n--\r\n-- The first branch is the carry-in, same as POSITION and MAGNET above: it\r\n-- looks just before the window, takes the last known state and draws it at\r\n-- the left edge, so the line starts there instead of at the first row inside\r\n-- the window. Bounded to 10 minutes -- unbounded it would reach back days into\r\n-- an earlier session and paint a flat 'silent' line across a window that has\r\n-- no tone data at all.\r\n--\r\n-- Filters are on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks. dev_ts is computed per row, so\r\n-- filtering on it means scanning every chunk on every refresh. dev_ts is still\r\n-- what gets PLOTTED; only the row selection uses host_ts, and the two never\r\n-- differ by more than the serial read cycle.\r\n(SELECT $__timeFrom()::timestamptz AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE'\r\n    AND rig_id = $rig AND session_id = $session AND host_ts <  $__timeFrom()::timestamptz\r\n    AND host_ts >= $__timeFrom()::timestamptz - interval '10 minutes'\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts))\r\nORDER BY time"
         }
       ],
       "fieldConfig": {
@@ -697,8 +704,8 @@
         "h": 8
       },
       "type": "gauge",
-      "title": "Cumulative rewards (Session)",
-      "description": "Water delivered per spout in the CURRENT session -- the highest session_id, which is the one the panel is logging to right now. Closing and re-adding a port starts a new session, so this resets then; it is not a running total for the day.",
+      "title": "Cumulative rewards (selected session)",
+      "description": "Water delivered per spout over the whole of the selected session. Unlike the live dashboard there is no 'start of today' bound -- a session that ran past midnight is counted end to end.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -713,7 +720,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1, count(*) FILTER (WHERE channel = 2) AS reward2 FROM events_dev WHERE type = 'REWARD' AND session_id = (SELECT max(session_id) FROM sessions WHERE rig_id = $rig) AND host_ts >= date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AT TIME ZONE 'America/Los_Angeles'"
+          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1,\n       count(*) FILTER (WHERE channel = 2) AS reward2\n  FROM events_dev\n WHERE type = 'REWARD' AND session_id = $session"
         }
       ],
       "fieldConfig": {
@@ -779,8 +786,8 @@
         "h": 8
       },
       "type": "piechart",
-      "title": "Trial outcomes  --  $total_trials trials in current session",
-      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort. Every completed trial is booked under exactly one of them, so the four slices add up to the total in the title.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Note this does NOT match the sum of 'Trials per hour', which covers the whole day: the two differ whenever a day has held more than one session.",
+      "title": "Trial outcomes  --  $total_trials trials in session $session",
+      "description": "How the selected session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort. Whole session, no day bound.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -795,7 +802,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\r\n--\r\n-- Gated to the current session exactly as 'Cumulative rewards (Session)' is:\r\n-- the max session_id, plus the start of the local day. The day bound matters\r\n-- for a session that has run past midnight -- it keeps the pie on today's\r\n-- part of it.\r\n--\r\n-- Filtered on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks.\r\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\r\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\r\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\r\n       count(*) FILTER (WHERE channel = 3) AS \"abort\"\r\n  FROM events_dev,\r\n       (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d\r\n WHERE type = 'OUTCOME'\r\n   AND session_id = (SELECT max(session_id) FROM sessions WHERE rig_id = $rig)\r\n   AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n   AND host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'"
+          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\n       count(*) FILTER (WHERE channel = 3) AS \"abort\"\n  FROM events_dev\n WHERE type = 'OUTCOME' AND session_id = $session"
         }
       ],
       "fieldConfig": {
@@ -931,8 +938,8 @@
         "h": 8
       },
       "type": "barchart",
-      "title": "Trials per hour (today)",
-      "description": "Trials booked in each hour of the current local day, across ALL sessions in that day. All 24 bins are always drawn: generate_series supplies the hours and the LEFT JOIN fills the empty ones with zero, so the shape of the day is visible from the first trial onwards.\n\nDeliberately ignores the dashboard time range -- it is always the whole of today, which is the point of it. Also deliberately NOT session-gated, unlike the two panels to its left: a per-hour view of the day that reset on every reconnect would not show the shape of the day.",
+      "title": "Trials per hour (selected session)",
+      "description": "Trials booked in each hour of the clock, for the selected session only. All 24 bins are always drawn -- generate_series supplies the hours and the LEFT JOIN zero-fills the empty ones. Ignores the time picker, like its counterpart on the live dashboard.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -947,7 +954,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- 24 hourly bins for the current local day, zero-filled.\r\n--\r\n-- No $__timeFilter anywhere: this panel is always \"today\", whatever the\r\n-- dashboard's time picker says. That is intentional -- it is the one panel\r\n-- meant to give the shape of the whole session day while the rest of the\r\n-- dashboard sits on a 2-minute live window.\r\nWITH d AS (\r\n  SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm\r\n),\r\nbins AS (\r\n  SELECT generate_series(0, 23) AS hr\r\n),\r\ntrials AS (\r\n  SELECT date_part('hour', e.host_ts AT TIME ZONE 'America/Los_Angeles')::int AS hr,\r\n         count(*) AS n\r\n    FROM events_dev e, d\r\n   WHERE e.type = 'OUTCOME'\n     AND e.rig_id = $rig\r\n     AND e.host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n     AND e.host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'\r\n   GROUP BY 1\r\n)\r\nSELECT lpad(b.hr::text, 2, '0') || ':00' AS \"hour\",\r\n       COALESCE(t.n, 0)::bigint          AS \"trials\"\r\n  FROM bins b\r\n  LEFT JOIN trials t ON t.hr = b.hr\r\n ORDER BY b.hr"
+          "rawSql": "-- 24 hourly bins for the selected session, zero-filled.\n--\n-- No $__timeFilter: this panel always covers the whole session, whatever the\n-- picker says, so it keeps its shape while you zoom the traces above.\nWITH bins AS (\n  SELECT generate_series(0, 23) AS hr\n),\ntrials AS (\n  SELECT date_part('hour', e.host_ts AT TIME ZONE 'America/Los_Angeles')::int AS hr,\n         count(*) AS n\n    FROM events_dev e\n   WHERE e.type = 'OUTCOME' AND e.session_id = $session\n   GROUP BY 1\n)\nSELECT lpad(b.hr::text, 2, '0') || ':00' AS \"hour\",\n       COALESCE(t.n, 0)::bigint          AS \"trials\"\n  FROM bins b\n  LEFT JOIN trials t ON t.hr = b.hr\n ORDER BY b.hr"
         }
       ],
       "fieldConfig": {
