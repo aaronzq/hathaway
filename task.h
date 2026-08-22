@@ -140,11 +140,20 @@ private:
 // because water was delivered. The counters are on the base class rather than
 // on task 3 so the sketch can log an outcome without knowing which task ran.
 
+// APPEND ONLY. These codes are the `channel` field of the OUTCOME telemetry
+// line, so they are written into every database row and into the dashboard
+// queries. Adding at the end leaves historical data meaning what it meant;
+// inserting in the middle silently relabels months of it.
 enum : uint8_t {
   OUTCOME_HIT = 0,        // the animal did the right thing
   OUTCOME_INCORRECT,      // it responded, on the wrong spout
   OUTCOME_NO_RESPONSE,    // the response window closed with no answer
   OUTCOME_ABORT,          // the trial was cut short before it could be answered
+  // A no-response that was rescued: water was given at the correct spout to
+  // show the animal where the answer was. Its own outcome and not a hit,
+  // because nothing was discriminated -- performance is hit/(hit+incorrect),
+  // and TEACH + NO_RESPONSE together are the trials that went unanswered.
+  OUTCOME_TEACH,
   OUTCOME_COUNT,
 };
 
@@ -238,5 +247,5 @@ private:
   uint32_t transitions_  = 0;
   bool     entered_      = false;
   uint8_t  lastOutcome_  = OUTCOME_HIT;
-  uint32_t outcomes_[OUTCOME_COUNT] = {0, 0, 0, 0};
+  uint32_t outcomes_[OUTCOME_COUNT] = {0, 0, 0, 0, 0};
 };

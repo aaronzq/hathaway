@@ -39,12 +39,14 @@ unsigned long T3_CONSUME_MS    = 1500;
 unsigned long T3_PUNISH_MS     = 2000;
 unsigned long T3_ITI_MS        = 250;
 unsigned long T3_MAX_REPEAT    = 3;
-unsigned long T3_ANTI_BIAS_FORCE = 0;
+unsigned long T3_ANTI_BIAS_PROB1 = 50;
+unsigned long T3_TEACH_PROB      = 0;
 unsigned long T3_EARLY_LICK_PUNISH = 1;
 
 // The random source task 3 draws its trial type from. On the firmware this is
 // esp_random(); here it is a scripted ring, so a whole trial SEQUENCE can be
-// asserted rather than just one trial. Only bit 0 is read by the task.
+// asserted rather than just one trial. The task reads it modulo 100 against a
+// percentage, so a scripted value of 10 is "type 1 at any threshold above 10".
 static std::vector<uint32_t> g_rand;
 static size_t                g_randIdx = 0;
 
@@ -406,6 +408,23 @@ static void runHitTrial(Harness &h) {
   h.advance(T3_ITI_MS);                    // -> IDLE
 }
 
+// One whole trial left unanswered, leaving the machine back in IDLE. The
+// consumption period is only served if the trial was rescued -- advancing
+// through it unconditionally would start the NEXT trial and desync the caller.
+static void runNoResponseTrial(Harness &h) {
+  toResponse(h);
+  h.advance(T3_RESPONSE_MS);                // -> REWARD if rescued, else ITI
+  if (h.task()->state() == T3_REWARD) h.advance(T3_CONSUME_MS);
+  h.advance(T3_ITI_MS);                     // -> IDLE
+}
+
+// Count how many of the sample states entered were of one type.
+static size_t countType(const std::string &seq, char type) {
+  size_t n = 0;
+  for (char c : seq) if (c == type) n++;
+  return n;
+}
+
 static void test_task3_hit_trial() {
   printf("task 3: sample -> delay -> go cue -> correct lick -> water -> ITI\n");
   setRand({0});                            // bit 0 clear = trial type 1
@@ -586,79 +605,140 @@ static void test_task3_repeat_cap() {
   check(h.task()->outcomeCount(OUTCOME_HIT) == 8, "and all eight booked as hits");
 }
 
-static void test_task3_anti_bias_force() {
-  printf("task 3: T3_ANTI_BIAS_FORCE pins every trial to one type\n");
-  setRand({0});                            // a coin stuck on type 1
+static void test_task3_prob1_drives_the_split() {
+  printf("task 3: T3_ANTI_BIAS_PROB1 sets the percentage of type-1 trials\n");
+  // Two scripted draws, 10 and 70, replayed in a ring. Which type each becomes
+  // depends entirely on where T3_ANTI_BIAS_PROB1 sits between them.
+  unsigned long saved = T3_ANTI_BIAS_PROB1;
 
-  T3_ANTI_BIAS_FORCE = 2;                  // ... and an operator overruling it
-  Harness h(taskById(3));
-  for (int i = 0; i < 8; i++) runHitTrial(h);
-  check(sampleSeq(h.trace()) == "22222222",
-        "force = 2 beats the draw, and keeps beating T3_MAX_REPEAT past 3 in a row");
+  T3_ANTI_BIAS_PROB1 = 50;                 // 10 -> type 1, 70 -> type 2
+  setRand({10, 70});
+  Harness a(taskById(3));
+  for (int i = 0; i < 6; i++) runHitTrial(a);
+  check(sampleSeq(a.trace()) == "121212", "at 50 the two draws straddle it and alternate");
 
-  T3_ANTI_BIAS_FORCE = 1;                  // switch the drill to the other side
-  h.clearTrace();
-  for (int i = 0; i < 4; i++) runHitTrial(h);
-  check(sampleSeq(h.trace()) == "1111", "force = 1 switches the drill at once");
+  T3_ANTI_BIAS_PROB1 = 80;                 // now BOTH draws are under it
+  setRand({10, 70});
+  Harness b(taskById(3));
+  for (int i = 0; i < 8; i++) runHitTrial(b);
+  check(sampleSeq(b.trace()) == "11121112",
+        "at 80 both draws say type 1, and only T3_MAX_REPEAT breaks the run");
 
-  T3_ANTI_BIAS_FORCE = 0;
+  T3_ANTI_BIAS_PROB1 = 0;                  // neither draw is under it
+  setRand({10, 70});
+  Harness c(taskById(3));
+  for (int i = 0; i < 8; i++) runHitTrial(c);
+  check(sampleSeq(c.trace()) == "22212221", "at 0 every trial is type 2, capped the same way");
+
+  T3_ANTI_BIAS_PROB1 = saved;
 }
 
-static void test_task3_force_release_flips_once() {
-  printf("task 3: the first free trial after a release is the other type\n");
-  setRand({0});                            // the coin would say type 1 every time
-  T3_ANTI_BIAS_FORCE = 1;
+static void test_task3_max_repeat_caps_the_bias() {
+  printf("task 3: T3_MAX_REPEAT bounds the achievable bias to N/(N+1)\n");
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sc = T3_MAX_REPEAT;
+  T3_ANTI_BIAS_PROB1 = 100;                // ask for every trial to be type 1
 
-  Harness h(taskById(3));
-  for (int i = 0; i < 6; i++) runHitTrial(h);   // six forced type-1 trials
-
-  T3_ANTI_BIAS_FORCE = 0;                  // release
-  h.clearTrace();
-  for (int i = 0; i < 5; i++) runHitTrial(h);
-
-  // Forced trials count towards the run history, so runLen_ is well over the cap
-  // and the coin is overruled once. Then normal capped behaviour resumes: with
-  // this rigged coin that is three type 1s and a forced type 2.
-  check(sampleSeq(h.trace()) == "21112",
-        "one forced flip on release, then the usual capped sequence");
-
-  T3_ANTI_BIAS_FORCE = 0;
-}
-
-static void test_task3_force_survives_a_long_block() {
-  printf("task 3: a forced block longer than a uint8_t still flips on release\n");
+  T3_MAX_REPEAT = 3;
   setRand({0});
-  T3_ANTI_BIAS_FORCE = 2;
+  Harness a(taskById(3));
+  for (int i = 0; i < 20; i++) runHitTrial(a);
+  std::string sa = sampleSeq(a.trace());
+  check(countType(sa, '1') == 15 && sa.size() == 20,
+        "cap 3 yields 15/20 type 1 -- 75%, not the 100% asked for");
 
-  Harness h(taskById(3));
-  // 300 trials: past 255, where an unclamped run counter would wrap to 0 and
-  // silently lose the cap at exactly the moment it is wanted.
-  for (int i = 0; i < 300; i++) runHitTrial(h);
-  check(sampleSeq(h.trace()).find('1') == std::string::npos,
-        "300 forced trials, not one of them the other type");
+  T3_MAX_REPEAT = 9;                       // raise the cap, raise the ceiling
+  setRand({0});
+  Harness b(taskById(3));
+  for (int i = 0; i < 20; i++) runHitTrial(b);
+  std::string sb = sampleSeq(b.trace());
+  check(countType(sb, '1') == 18 && sb.size() == 20,
+        "cap 9 yields 18/20 -- 90%, so the cap and not the probability is the limit");
 
-  T3_ANTI_BIAS_FORCE = 0;
-  h.clearTrace();
-  runHitTrial(h);
-  check(sampleSeq(h.trace()) == "1", "and the release still flips, so runLen_ did not wrap");
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sc;
 }
 
-static void test_task3_force_out_of_range_is_ignored() {
-  printf("task 3: an out-of-range force falls back to the normal draw\n");
-  setRand({0});
-  T3_ANTI_BIAS_FORCE = 7;                  // CMD_TABLE rejects this; belt and braces
+static void test_task3_teach_rescues_a_deadline() {
+  printf("task 3: T3_TEACH_PROB waters the correct spout on an unanswered trial\n");
+  T3_TEACH_PROB = 100;                     // rescue every one, for the test
+  setRand({0});                            // type 1, so spout 1 is correct
 
   Harness h(taskById(3));
-  for (int i = 0; i < 8; i++) runHitTrial(h);
-  check(sampleSeq(h.trace()) == "11121112",
-        "the ordinary capped sequence, exactly as if the force were off");
+  toResponse(h);
+  h.clearTrace();
 
-  T3_ANTI_BIAS_FORCE = 0;
+  h.advance(T3_RESPONSE_MS);
+  check(h.trace() == "[REWARD]REWARD(1)",
+        "the window closes and water arrives at the CORRECT spout");
+  h.clearTrace();
+
+  h.advance(T3_CONSUME_MS);
+  check(h.trace() == "[ITI]", "then the usual consumption period and ITI");
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 1, "booked as TEACH");
+  check(h.task()->outcomeCount(OUTCOME_HIT) == 0, "and never as a hit");
+  check(h.task()->outcomeCount(OUTCOME_NO_RESPONSE) == 0, "nor as a no-response");
+
+  T3_TEACH_PROB = 0;
+}
+
+static void test_task3_teach_rescues_a_walk_off_too() {
+  printf("task 3: leaving the port mid-window is rescued on the same odds\n");
+  T3_TEACH_PROB = 100;
+  setRand({50});                           // type 2, so spout 2 is correct
+
+  Harness h(taskById(3));
+  toResponse(h);
+  h.clearTrace();
+
+  h.cycle(0, AWAY);
+  check(h.trace() == "[REWARD]REWARD(2)",
+        "walking off is rescued too, and on that trial's own correct spout");
+  h.advance(T3_CONSUME_MS);
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 1, "also booked as TEACH");
+
+  T3_TEACH_PROB = 0;
+}
+
+static void test_task3_teach_off_gives_a_plain_no_response() {
+  printf("task 3: T3_TEACH_PROB = 0 leaves an unanswered trial unrescued\n");
+  setRand({0});
+  Harness h(taskById(3));                  // T3_TEACH_PROB is 0 by default here
+  toResponse(h);
+  h.clearTrace();
+
+  h.advance(T3_RESPONSE_MS);
+  check(h.trace() == "[ITI]", "no REWARD action at all: straight to the ITI");
+  check(h.task()->outcomeCount(OUTCOME_NO_RESPONSE) == 1, "booked as no-response");
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 0, "and nothing booked as TEACH");
+}
+
+static void test_task3_teach_draw_only_when_enabled() {
+  printf("task 3: the rescue draw is taken only when T3_TEACH_PROB is set\n");
+  // Draws 0 and 50 in a ring: 0 -> type 1, 50 -> type 2 at the default 50%.
+  // Off, an unanswered trial takes no draw, so the next trial gets the 50.
+  // On, the rescue eats the 50 and the next trial gets the 0 again.
+  T3_TEACH_PROB = 0;
+  setRand({0, 50});
+  Harness a(taskById(3));
+  runNoResponseTrial(a);
+  runNoResponseTrial(a);
+  check(sampleSeq(a.trace()) == "12", "off: two trials consume two draws");
+
+  T3_TEACH_PROB = 100;
+  setRand({0, 50});
+  Harness b(taskById(3));
+  runNoResponseTrial(b);
+  runNoResponseTrial(b);
+  check(sampleSeq(b.trace()) == "11",
+        "on: the first trial's rescue consumes the 50, so the second draws 0 again");
+  check(b.task()->outcomeCount(OUTCOME_TEACH) == 2, "both trials were rescued");
+
+  T3_TEACH_PROB = 0;
 }
 
 static void test_task3_type2_maps_to_spout2() {
   printf("task 3: trial type 2 plays its own tone and is answered on spout 2\n");
-  setRand({1});                            // bit 0 set = trial type 2
+  setRand({50});                           // 50 is not < 50, so trial type 2
   Harness h(taskById(3));
 
   h.cycle(0, AWAY);
@@ -691,11 +771,13 @@ static void test_task3_simultaneous_licks_score_a_hit() {
 }
 
 static void test_task3_outcomes_account_for_every_trial() {
-  printf("task 3: the four outcome counts always add up to trial()\n");
-  setRand({0, 1, 0, 0, 1});
+  printf("task 3: the five outcome counts always add up to trial()\n");
+  setRand({0, 50, 0, 0, 50, 0});
   Harness h(taskById(3));
 
-  // A deliberate mix: a hit, an incorrect, a deadline no-response and an abort.
+  // One of every outcome: a hit, an incorrect, a deadline no-response, an abort,
+  // and a rescued no-response. Loop over the whole enum at the end rather than
+  // naming four of them, so adding a sixth outcome without a test fails here.
   runHitTrial(h);
 
   uint8_t correct = toResponse(h);
@@ -704,23 +786,27 @@ static void test_task3_outcomes_account_for_every_trial() {
   h.advance(T3_ITI_MS);
 
   toResponse(h);
-  h.advance(T3_RESPONSE_MS);                     // no answer
+  h.advance(T3_RESPONSE_MS);                     // no answer, no rescue
   h.advance(T3_ITI_MS);
 
   h.advance(1);                                  // -> SAMPLEn
   h.cycle(0, AWAY);                              // abort
   h.advance(T3_ITI_MS);
 
+  T3_TEACH_PROB = 100;
+  runNoResponseTrial(h);                         // no answer, rescued
+  T3_TEACH_PROB = 0;
+
   Task *t = h.task();
-  const uint32_t sum = t->outcomeCount(OUTCOME_HIT)
-                     + t->outcomeCount(OUTCOME_INCORRECT)
-                     + t->outcomeCount(OUTCOME_NO_RESPONSE)
-                     + t->outcomeCount(OUTCOME_ABORT);
-  check(t->trial() == 4, "four trials ran");
+  uint32_t sum = 0;
+  for (uint8_t o = 0; o < OUTCOME_COUNT; o++) sum += t->outcomeCount(o);
+  check(t->trial() == 5, "five trials ran");
   check(sum == t->trial(), "and every one of them is booked under exactly one outcome");
-  check(t->outcomeCount(OUTCOME_HIT) == 1 && t->outcomeCount(OUTCOME_INCORRECT) == 1
-        && t->outcomeCount(OUTCOME_NO_RESPONSE) == 1 && t->outcomeCount(OUTCOME_ABORT) == 1,
-        "one of each");
+
+  bool one_each = true;
+  for (uint8_t o = 0; o < OUTCOME_COUNT; o++)
+    if (t->outcomeCount(o) != 1) one_each = false;
+  check(one_each, "one of each, including TEACH");
 }
 
 static void test_task3_zero_delay() {
@@ -837,10 +923,12 @@ int main() {
   test_task3_early_lick_replays();
   test_task3_early_lick_tolerated();
   test_task3_repeat_cap();
-  test_task3_anti_bias_force();
-  test_task3_force_release_flips_once();
-  test_task3_force_survives_a_long_block();
-  test_task3_force_out_of_range_is_ignored();
+  test_task3_prob1_drives_the_split();
+  test_task3_max_repeat_caps_the_bias();
+  test_task3_teach_rescues_a_deadline();
+  test_task3_teach_rescues_a_walk_off_too();
+  test_task3_teach_off_gives_a_plain_no_response();
+  test_task3_teach_draw_only_when_enabled();
   test_task3_type2_maps_to_spout2();
   test_task3_simultaneous_licks_score_a_hit();
   test_task3_outcomes_account_for_every_trial();

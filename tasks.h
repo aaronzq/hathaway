@@ -128,17 +128,19 @@ private:
 //  reports which it was by licking one of the two spouts after a go cue.
 //
 //  TRIAL TYPE. Drawn on arrival at the port: type 1 (T3_SAMPLE_FREQ1, correct
-//  answer = spout 1) or type 2 (T3_SAMPLE_FREQ2, correct answer = spout 2), at
-//  even odds -- except that the same type cannot run more than T3_MAX_REPEAT
-//  times in a row, so an animal cannot do well by always licking one side. The
-//  draw comes from task_rand32(), which the sketch backs with the hardware RNG
-//  and the host test backs with a scripted sequence.
+//  answer = spout 1) or type 2 (T3_SAMPLE_FREQ2, correct answer = spout 2). The
+//  split is T3_ANTI_BIAS_PROB1 percent type 1, except that the same type cannot
+//  run more than T3_MAX_REPEAT times in a row, so an animal cannot do well by
+//  always licking one side. The draw comes from task_rand32(), which the sketch
+//  backs with the hardware RNG and the host test backs with a scripted sequence.
 //
-//  ANTI-BIAS. Two mechanisms, one automatic and one manual. T3_MAX_REPEAT is the
-//  automatic one above, and runs unattended. T3_ANTI_BIAS_FORCE is the operator's
-//  override: 1 or 2 makes every trial that type, beating both the coin and the
-//  cap, until it is set back to 0. Forced trials still count towards the repeat
-//  history, so the first free trial after a release is the other type.
+//  ANTI-BIAS. Three mechanisms, in order of bluntness. T3_MAX_REPEAT caps runs
+//  and needs no attention. T3_ANTI_BIAS_PROB1 skews the split towards the type
+//  the animal neglects; the cap still wins, which bounds the achievable skew to
+//  N/(N+1). T3_TEACH_PROB rescues unanswered trials with water at the correct
+//  spout, guiding the animal to the side it is ignoring -- booked as
+//  OUTCOME_TEACH, never as a hit. All three are set by the operator from the
+//  control panel; none of them adapts on its own.
 //
 //  The names here are 1 and 2 throughout, never "left" and "right": the mapping
 //  from spout number to physical side is a property of the rig, not of the code,
@@ -157,8 +159,12 @@ private:
 //    INCORRECT    lick on the other spout        -> T3_PUNISH_MS timeout
 //    NO_RESPONSE  the window closed unanswered, OR the animal left the port
 //                 after the go cue without answering
+//    TEACH        as NO_RESPONSE, but rescued: water at the correct spout, on
+//                 T3_TEACH_PROB percent of them
 //    ABORT        the animal left the port before the go cue
-//  Every one of them then serves T3_ITI_MS, aborts included.
+//  Every one of them then serves T3_ITI_MS, aborts included. Discrimination
+//  performance is HIT/(HIT+INCORRECT): TEACH gave water without testing
+//  anything, and TEACH+NO_RESPONSE are the trials that went unanswered.
 //
 //  Water uses REWARD_DURATION1 / REWARD_DURATION2 -- the same valve times as
 //  every other task. There is deliberately no task-3 override: how long a spout
@@ -170,7 +176,7 @@ private:
 //      GOCUE     --T3_CUE_DUR-->  RESPONSE
 //      RESPONSE  --correct-->     REWARD  (water) --T3_CONSUME_MS--> ITI
 //      RESPONSE  --wrong-->       PUNISH  --T3_PUNISH_MS-->          ITI
-//      RESPONSE  --window shut, or left the port-->                  ITI
+//      RESPONSE  --window shut, or left the port--> REWARD if rescued, else ITI
 //      SAMPLEn | DELAY  --lick, if T3_EARLY_LICK_PUNISH--> SAMPLEn (replay)
 //      SAMPLEn | DELAY | GOCUE  --out of position-->       ITI (abort)
 //      ITI       --T3_ITI_MS-->   IDLE

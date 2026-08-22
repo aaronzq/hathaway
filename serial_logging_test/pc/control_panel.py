@@ -60,6 +60,18 @@ class RigState:
         self.connected = False
         self.err = None
         self.params = {}                      # name -> value
+        # Staging dict for a dump in progress, or None when not collecting. A
+        # dump is a complete statement of what the rig has, so it REPLACES
+        # self.params rather than merging into it -- otherwise a parameter
+        # renamed in the firmware leaves a ghost row in the UI whose Set button
+        # sends a command the rig will reject.
+        #
+        # Removals therefore land in one step, at the end of the dump. Additions
+        # land as they arrive, because self.params is still written live, so for
+        # the few ms a dump is in flight the published list can be a superset of
+        # both. Never a subset, which is the direction that would matter: no live
+        # parameter ever disappears from the UI mid-dump.
+        self.param_dump = None
         self.weight_buf = deque(maxlen=WEIGHT_AVG_N)  # raw weights for the moving avg
         self.counts = defaultdict(int)        # e.g. "LICK1", "REWARD2"
         self.dropped = 0
@@ -77,7 +89,7 @@ class RigState:
             "port": self.port,
             "connected": self.connected,
             "err": self.err,
-            "params": self.params,
+            "params": dict(self.params),       # copied: a reader thread may swap it
             "weight": self.weight_avg(),      # moving average (display only)
             "counts": dict(self.counts),
             "dropped": self.dropped,
@@ -303,6 +315,12 @@ class Controller:
         if rest.startswith("#"):
             ingest.parse_schema_line(rest)   # "#DEF <NAME>,<S|E>"
             if rest.startswith("#DEF"):
+                # A #DEF burst opens a fresh parameter statement. Both setup()
+                # and the DUMP command send dumpSchema() then dumpParams(), so
+                # the first #DEF is the one reliable "a full parameter list is
+                # coming" marker on the wire -- there is no explicit delimiter.
+                if st.param_dump is None:
+                    st.param_dump = {}
                 # setup() dumps the schema, so this may be a restart -- but our
                 # own DUMP looks identical, so only arm the detector. See
                 # DeviceClock.arm_boot(). Sent through the queue rather than
@@ -323,7 +341,9 @@ class Controller:
                 v = float(val)
             except ValueError:
                 v = val
-            st.params[name] = v
+            st.params[name] = v              # keep the live view current-valued
+            if st.param_dump is not None:    # ... and collect the replacement set
+                st.param_dump[name] = v
             st.log.append(rest)
             if isinstance(v, float):
                 try:
@@ -334,6 +354,19 @@ class Controller:
                                          "channel": 0, "value": v, "t_us": t_us}],
                                *self._stamps()))
             return
+
+        # Anything that is neither a comment nor a PARAM: ack ends a dump. The
+        # firmware enqueues the whole burst from service(), which runs at the top
+        # of loop() before any sensor is read, so the dump is contiguous on the
+        # wire and the first telemetry line after it is a reliable terminator.
+        #
+        # Guarded on non-empty: a dump truncated by a full telemetry queue would
+        # otherwise wipe the list. Dropping a row that IS still live is the worse
+        # failure of the two, and clicking Fetch repairs it.
+        if st.param_dump is not None:
+            if st.param_dump:
+                st.params = st.param_dump
+            st.param_dump = None
 
         # Normal telemetry -> parse with the existing ingest parser.
         recs = ingest.parse_hathaway(rest)
@@ -747,6 +780,11 @@ function renderControl(state){
   Object.keys(params).forEach(function(name){
     ensureCtlRow(rig,name);
     ctlRows[name].querySelector('[data-cur]').textContent=params[name];});
+  // Drop rows the rig no longer reports. Without this a parameter renamed in the
+  // firmware keeps its row in the table after a re-flash -- and it looks live,
+  // while its Set button sends a name the rig answers with "#ERR".
+  Object.keys(ctlRows).forEach(function(name){
+    if(!(name in params)){ctlRows[name].remove();delete ctlRows[name];}});
   // Show only the running task's parameters. Until the rig reports TASK, cur is
   // undefined and every T<n>_ row stays hidden -- better than showing all three
   // tasks' parameters at once and letting the operator set one that is not live.

@@ -30,8 +30,8 @@ const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
 // Runtime-tunable over serial via "SET <NAME> <VALUE>" (see hathaway.ino).
 // Mutable (not const) so the command handler can update them live. This header
 // is included only by hathaway.ino, so single-definition is fine.
-unsigned long REWARD_DURATION1 = 50;    // spout 1 solenoid open time, ms
-unsigned long REWARD_DURATION2 = 42;    // spout 2 solenoid open time, ms
+unsigned long REWARD_DURATION1 = 63;    // spout 1 solenoid open time, ms
+unsigned long REWARD_DURATION2 = 55;    // spout 2 solenoid open time, ms
 unsigned long REWARD_INTERVAL1 = 3000;  // refractory after a spout-1 reward, ms
 unsigned long REWARD_INTERVAL2 = 3000;  // refractory after a spout-2 reward, ms
 // Buzzer PWM duty cycle, percent. 50 is the plain square wave; away from it the
@@ -42,7 +42,7 @@ unsigned long BUZ_PULSE_WIDTH = 50;
 unsigned long MAG_FIX_DURATION = 5000;
 // Load-cell halts are ignored for this long after the magnet turns on, ms.
 // Keep it well below MAG_FIX_DURATION or the early release never happens.
-unsigned long MAG_GRACE_MS = 0;
+unsigned long MAG_GRACE_MS = 1000;
 float SCALE_HIGH_THRESH = 40.0;
 float SCALE_LOW_THRESH  = 10.0;
 
@@ -83,8 +83,8 @@ unsigned long T2_CUE_TO_WATER = 100;    // cue ONSET -> licks count, ms. Licks
 // Zero is how task 2 retires a spout: T2_N1 = 0 puts every trial on spout 2.
 // Both zero leaves no spout live at all -- the mouse gets one cue on arrival
 // and then nothing, which is the task's way of saying "stop".
-unsigned long T2_N1 = 10;
-unsigned long T2_N2 = 10;
+unsigned long T2_N1 = 3;
+unsigned long T2_N2 = 3;
 
 // --- task 3 ----------------------------------------------------------------
 // Two-tone discrimination with a delay. Trial type 1 plays T3_SAMPLE_FREQ1 and
@@ -108,7 +108,7 @@ unsigned long T3_GAP_MS   = 100;        // silence between pulses, ms
 unsigned long T3_N_PULSES = 3;          // pulses per sample
 
 // The working-memory delay. Raised through training: 0 -> 300 -> 600 -> 1200.
-unsigned long T3_DELAY_MS = 1200;
+unsigned long T3_DELAY_MS = 0;
 
 unsigned long T3_CUE_FREQ = 6000;       // go cue frequency, Hz
 unsigned long T3_CUE_DUR  = 100;        // go cue duration, ms. The response
@@ -124,25 +124,52 @@ unsigned long T3_ITI_MS      = 250;     // inter-trial interval, ms. Served
 // At most this many consecutive trials of the same type; the next one is then
 // forced to the other type. 1 gives strict alternation, which is predictable
 // and therefore learnable -- 3 or 4 is the usual choice.
+//
+// This ALWAYS wins, including over T3_ANTI_BIAS_PROB1 below, and that puts a
+// ceiling on how biased the trial sequence can actually get: with a cap of N the
+// most one type can occupy is N/(N+1) of trials -- 75% at the default of 3,
+// however extreme the probability is set. Raise the cap as well as the
+// probability, or the cap will keep clawing trials back. Guo et al. 2014 use the
+// same "maximum of three consecutive trials of a single type" convention.
 unsigned long T3_MAX_REPEAT = 3;
 
-// MANUAL anti-bias override, for an animal that has learned to answer one side.
-// 0 = off, the trial type is drawn as usual. 1 or 2 = every trial is that type,
-// overriding both the coin and T3_MAX_REPEAT, until this is set back to 0.
+// MANUAL anti-bias: the probability, IN PERCENT, that a trial is type 1. Type 2
+// therefore gets (100 - this). 50 is unbiased and is the default.
 //
-// Use it when the outcome pie goes lopsided: drill the neglected type for a
-// while, then release. Forced trials still count towards the repeat history, so
-// the first trial after the release is the OTHER type -- the coin cannot hand
-// the animal one more of what it has just been drilled on.
+// Use it when the outcome pie goes lopsided: an animal that only ever answers
+// spout 1 gets more type-2 trials until it starts working for them. Unlike the
+// hard force this replaced, it does NOT override T3_MAX_REPEAT -- see the
+// ceiling noted above, and note that an extreme value against a small cap
+// degenerates into a fixed pattern (100 against a cap of 3 gives a perfectly
+// periodic 1,1,1,2,1,1,1,2...), which is itself learnable.
 //
 // Takes effect at the next trial: the type is chosen as the trial leaves IDLE,
 // so changing this mid-trial never rewrites the trial in progress.
-unsigned long T3_ANTI_BIAS_FORCE = 0;
+unsigned long T3_ANTI_BIAS_PROB1 = 50;
+
+// Teaching rescue: the probability, IN PERCENT, that a trial which got no answer
+// is given water at the CORRECT spout anyway, to show the animal where the
+// answer was. 0 disables it. Applies to both ways a trial can go unanswered --
+// the response window closing, and the animal leaving the port during it.
+//
+// Booked as OUTCOME_TEACH, never as a hit: nothing was discriminated. It is a
+// softer form of the prompt Guo et al. 2014 give by hand ("water delivery by
+// manually clicking a computer-controlled valve was necessary to prompt the mice
+// to lick the other lickport"), and it pairs with T3_ANTI_BIAS_PROB1 -- a biased
+// animal gets both more trials of the neglected type and more guided rescues on
+// them.
+//
+// KEEP IT LOW, and set it back to 0 once the animal is answering. Guessing at
+// random earns water on half of trials at the cost of a timeout on the other
+// half; doing nothing earns water on this fraction of trials at no cost at all.
+// Much above 50 and withholding becomes the better strategy outright, and it is
+// tempting well below that.
+unsigned long T3_TEACH_PROB = 0;
 
 // What a lick during the sample or the delay does. 1 = replay the trial from
 // its sample tone, same trial type. 0 = log the lick and ignore it, which is
 // how an animal that cannot yet withhold is trained up.
-unsigned long T3_EARLY_LICK_PUNISH = 1;
+unsigned long T3_EARLY_LICK_PUNISH = 0;
 
 // The random source task 3 draws its trial type from. Defined here so the task
 // layer itself stays free of hardware: tools/task_test.cpp defines its own

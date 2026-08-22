@@ -6,7 +6,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 106,
+  "version": 105,
   "editable": true,
   "liveNow": false,
   "refresh": "500ms",
@@ -269,7 +269,7 @@
       },
       "type": "timeseries",
       "title": "Lick, Reward & Outcome events",
-      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.",
+      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.\n\nTEACH (purple) is an unanswered trial that was rescued with water at the correct spout, on T3_TEACH_PROB percent of them. It produces a REWARD event too, so a purple mark with no preceding lick is the signature of a rescue.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -358,6 +358,17 @@
           "editorMode": "code",
           "rawQuery": true,
           "rawSql": "SELECT dev_ts AS time, 5 AS abort FROM events_dev WHERE type = 'OUTCOME' AND channel = 3 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "I",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS teach FROM events_dev WHERE type = 'OUTCOME' AND channel = 4 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -472,6 +483,21 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "semi-dark-blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "teach"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
                 }
               }
             ]
@@ -780,7 +806,7 @@
       },
       "type": "piechart",
       "title": "Trial outcomes  --  $total_trials trials in current session",
-      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort. Every completed trial is booked under exactly one of them, so the four slices add up to the total in the title.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Note this does NOT match the sum of 'Trials per hour', which covers the whole day: the two differ whenever a day has held more than one session.",
+      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach. Every completed trial is booked under exactly one of them, so the five slices add up to the total in the title.\n\nREADING IT: discrimination performance is HIT/(HIT+INCORRECT). TEACH is an unanswered trial that was rescued with free water at the correct spout -- it gave water without testing anything, so it is NOT a success, and TEACH + NO RESPONSE together are the trials that went unanswered. Note the rewards gauge counts teach water too, so it tracks water delivered rather than water earned.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Does NOT match the sum of 'Trials per hour', which covers the whole day across all sessions.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -795,7 +821,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\r\n--\r\n-- Gated to the current session exactly as 'Cumulative rewards (Session)' is:\r\n-- the max session_id, plus the start of the local day. The day bound matters\r\n-- for a session that has run past midnight -- it keeps the pie on today's\r\n-- part of it.\r\n--\r\n-- Filtered on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks.\r\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\r\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\r\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\r\n       count(*) FILTER (WHERE channel = 3) AS \"abort\"\r\n  FROM events_dev,\r\n       (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d\r\n WHERE type = 'OUTCOME'\r\n   AND session_id = (SELECT max(session_id) FROM sessions WHERE rig_id = $rig)\r\n   AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n   AND host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'"
+          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\r\n--\r\n-- Gated to the current session exactly as 'Cumulative rewards (Session)' is:\r\n-- the max session_id, plus the start of the local day. The day bound matters\r\n-- for a session that has run past midnight -- it keeps the pie on today's\r\n-- part of it.\r\n--\r\n-- Filtered on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks.\r\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\r\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\r\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\r\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\r\n       count(*) FILTER (WHERE channel = 4) AS \"teach\"\r\n  FROM events_dev,\r\n       (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d\r\n WHERE type = 'OUTCOME'\r\n   AND session_id = (SELECT max(session_id) FROM sessions WHERE rig_id = $rig)\r\n   AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n   AND host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'"
         }
       ],
       "fieldConfig": {
@@ -887,6 +913,25 @@
               {
                 "id": "displayName",
                 "value": "ABORT"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "teach"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "TEACH"
               }
             ]
           }

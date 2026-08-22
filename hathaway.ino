@@ -151,6 +151,7 @@ static const CmdSpec CMD_TABLE[] = {
   // At least one pulse: zero would be a sample epoch with no sample in it.
   PARAM_U32(T3_N_PULSES,       1,   20,    nullptr),
   PARAM_U32(T3_DELAY_MS,       0,   10000, nullptr),
+  PARAM_U32(T3_EARLY_LICK_PUNISH, 0, 1,    nullptr),
   PARAM_U32(T3_CUE_FREQ,       100, 20000, nullptr),
   PARAM_U32(T3_CUE_DUR,        1,   5000,  nullptr),
   PARAM_U32(T3_RESPONSE_MS,    1,   30000, nullptr),
@@ -160,9 +161,13 @@ static const CmdSpec CMD_TABLE[] = {
   // 1 = strict alternation. Zero is excluded: it would force the type to flip
   // on every trial AND on itself, which is just alternation with a worse name.
   PARAM_U32(T3_MAX_REPEAT,     1,   100,   nullptr),
-  // Manual anti-bias override: 0 off, 1 or 2 forces every trial to that type.
-  PARAM_U32(T3_ANTI_BIAS_FORCE, 0,  2,     nullptr),
-  PARAM_U32(T3_EARLY_LICK_PUNISH, 0, 1,    nullptr),
+  // Percent chance a trial is type 1; type 2 gets the rest. 50 = unbiased.
+  // Capped in practice by T3_MAX_REPEAT -- see behavior_task.h.
+  PARAM_U32(T3_ANTI_BIAS_PROB1, 0,  100,   nullptr),
+  // Percent chance an unanswered trial is rescued with water at the correct
+  // spout. 0 = off. Keep low; see the warning in behavior_task.h.
+  PARAM_U32(T3_TEACH_PROB,     0,   100,   nullptr),
+  
   ACTION(TARE, doTare),
 };
 static const size_t CMD_COUNT = sizeof(CMD_TABLE) / sizeof(CMD_TABLE[0]);

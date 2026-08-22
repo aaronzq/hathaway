@@ -29,7 +29,8 @@ extern unsigned long T3_CONSUME_MS;
 extern unsigned long T3_PUNISH_MS;
 extern unsigned long T3_ITI_MS;
 extern unsigned long T3_MAX_REPEAT;
-extern unsigned long T3_ANTI_BIAS_FORCE;
+extern unsigned long T3_ANTI_BIAS_PROB1;
+extern unsigned long T3_TEACH_PROB;
 extern unsigned long T3_EARLY_LICK_PUNISH;
 
 // The one thing task 3 needs that is not a tunable and not in Inputs: a random
@@ -235,41 +236,25 @@ uint32_t DiscriminationTask::trainMs() const {
   return T3_N_PULSES * T3_PULSE_MS + (T3_N_PULSES - 1) * T3_GAP_MS;
 }
 
-// Even odds, except that T3_MAX_REPEAT identical trials in a row force the
-// other type next. Without the cap a fair coin still produces long runs, and an
-// animal that has just been rewarded four times on spout 1 learns the wrong
-// lesson from the fifth.
-//
-// T3_ANTI_BIAS_FORCE is the manual override of all of that: set it to 1 or 2 and
-// every trial is that type until it is set back to 0. It is the operator's tool
-// for an animal that has learned to answer one side -- watch the outcome pie go
-// lopsided, drill the neglected type for a while, then release it.
-//
-// The forced trials DO count towards the run history, so a long forced block
-// leaves runLen_ well over the cap and the first free trial after the release is
-// forced to the other type. That is deliberate: it stops the coin handing the
-// animal yet another trial of the type it has just been drilled on.
+// T3_ANTI_BIAS_PROB1 percent of trials are type 1 and the rest type 2, except
+// that T3_MAX_REPEAT identical trials in a row force the other type next. The
+// cap always wins, which is what bounds the achievable bias to N/(N+1) -- see
+// the note on T3_MAX_REPEAT in behavior_task.h. Without the cap a fair coin
+// still produces long runs, and an animal that has just been rewarded four
+// times on spout 1 learns the wrong lesson from the fifth.
 void DiscriminationTask::selectType() {
-  uint8_t t;
+  // Modulo 100 of a uint32 is biased by about two parts in 10^8, which is some
+  // ten thousand times smaller than the sampling noise in a 400-trial session.
+  uint8_t t = (task_rand32() % 100u < T3_ANTI_BIAS_PROB1) ? 1 : 2;
 
-  if (T3_ANTI_BIAS_FORCE == 1 || T3_ANTI_BIAS_FORCE == 2) {
-    // No draw at all while forced -- both so the scripted RNG in the host test
-    // stays in step, and because a discarded random number invites the reader to
-    // wonder whether it was meant to be used. Any value outside {1,2} falls
-    // through to the normal path, so a bad setting degrades to ordinary
-    // behaviour rather than to a task stuck on one side.
-    t = (uint8_t)T3_ANTI_BIAS_FORCE;
-  } else {
-    t = (task_rand32() & 1u) ? 2 : 1;
-    if (t == lastType_ && runLen_ >= T3_MAX_REPEAT) {
-      t = (t == 1) ? 2 : 1;               // the cap overrides the draw
-    }
+  if (t == lastType_ && runLen_ >= T3_MAX_REPEAT) {
+    t = (t == 1) ? 2 : 1;                 // the cap overrides the draw
   }
 
   if (t == lastType_) {
-    // Clamped: runLen_ is a uint8_t and a forced block can run for hundreds of
-    // trials. Left to wrap it would pass 255, restart at 0 and silently defeat
-    // the cap on release -- the one moment the cap is most wanted.
+    // Clamped: runLen_ is a uint8_t, and an extreme T3_ANTI_BIAS_PROB1 against a
+    // large cap can run for hundreds of trials. Left to wrap it would pass 255,
+    // restart at 0 and silently defeat the cap.
     if (runLen_ < 255) runLen_++;
   } else {
     lastType_ = t;
@@ -352,8 +337,17 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
         return T3_PUNISH;
       }
       // The window closing and the animal walking off are the same thing here:
-      // the trial was asked and not answered.
+      // the trial was asked and not answered. Either may be rescued.
       if (in.has(EV_TIMEOUT) || !in.level(LV_IN_POSITION)) {
+        // The teaching prompt: show the animal where the answer was by putting
+        // water on the correct spout. Drawn only when the feature is on, so with
+        // T3_TEACH_PROB at 0 the random stream is untouched and a scripted trial
+        // sequence stays reproducible.
+        if (T3_TEACH_PROB > 0 && task_rand32() % 100u < T3_TEACH_PROB) {
+          out.push(ACT_REWARD, type_, 0);
+          pending_ = OUTCOME_TEACH;
+          return T3_REWARD;               // shares the consumption period
+        }
         pending_ = OUTCOME_NO_RESPONSE;
         return T3_ITI;
       }
