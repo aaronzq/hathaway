@@ -34,7 +34,9 @@ extern unsigned long T3_ANTI_BIAS_AUTO_ENABLE;
 extern unsigned long T3_ANTI_BIAS_WIN;
 extern unsigned long T3_ANTI_BIAS_ACC_THRESH;
 extern unsigned long T3_TEACH_PROB;
+extern unsigned long T3_TEACH_INCLUDE_ABORT;
 extern unsigned long T3_EARLY_LICK_PUNISH;
+extern unsigned long T3_EARLY_LICK_PAUSE_MS;
 
 // The one thing task 3 needs that is not a tunable and not in Inputs: a random
 // draw for the trial type. Declared here, defined by whoever is hosting the
@@ -225,6 +227,7 @@ const char *DiscriminationTask::stateName(uint8_t s) const {
     case T3_REWARD:   return "REWARD";
     case T3_PUNISH:   return "PUNISH";
     case T3_ITI:      return "ITI";
+    case T3_EARLY_PAUSE: return "EARLY_PAUSE";
     default:          return "?";
   }
 }
@@ -338,6 +341,13 @@ void DiscriminationTask::recordAnsweredTrial(uint8_t outcome) {
   if (histCount_ < ANTI_BIAS_CAP) histCount_++;
 }
 
+bool DiscriminationTask::rescueTeach(ActionQueue &out) {
+  if (T3_TEACH_PROB == 0 || task_rand32() % 100u >= T3_TEACH_PROB) return false;
+  out.push(ACT_REWARD, type_, 0);
+  pending_ = OUTCOME_TEACH;
+  return true;
+}
+
 uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
   const bool licked = in.has(EV_LICK1) || in.has(EV_LICK2);
 
@@ -352,7 +362,9 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
     case T3_SAMPLE2:
     case T3_DELAY:
     case T3_GOCUE:
+    case T3_EARLY_PAUSE:
       if (!in.level(LV_IN_POSITION)) {
+        if (T3_TEACH_INCLUDE_ABORT && rescueTeach(out)) return T3_REWARD;
         pending_ = OUTCOME_ABORT;
         return T3_ITI;
       }
@@ -374,18 +386,25 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
 
     case T3_SAMPLE1:
     case T3_SAMPLE2:
-      // Returning s re-enters this state rather than staying in it: the tone
-      // restarts and the timer is rearmed. Same trial type, so a resample
-      // cannot be used to fish for an easier trial.
-      if (licked && T3_EARLY_LICK_PUNISH) return s;
+      if (licked && T3_EARLY_LICK_PUNISH) {
+        out.push(ACT_TONE_STOP);
+        return T3_EARLY_PAUSE;
+      }
       if (in.has(EV_TIMEOUT)) return T3_DELAY;
       return STAY;
 
     case T3_DELAY:
+      if (licked && T3_EARLY_LICK_PUNISH) {
+        out.push(ACT_TONE_STOP);
+        return T3_EARLY_PAUSE;
+      }
+      if (in.has(EV_TIMEOUT)) return T3_GOCUE;
+      return STAY;
+
+    case T3_EARLY_PAUSE:
       // Replays from the sample, not from the delay: the animal has to hear the
       // tone again, which is the point of the punishment.
-      if (licked && T3_EARLY_LICK_PUNISH) return sampleState();
-      if (in.has(EV_TIMEOUT)) return T3_GOCUE;
+      if (in.has(EV_TIMEOUT)) return sampleState();
       return STAY;
 
     case T3_GOCUE:
@@ -414,15 +433,10 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
       // The window closing and the animal walking off are the same thing here:
       // the trial was asked and not answered. Either may be rescued.
       if (in.has(EV_TIMEOUT) || !in.level(LV_IN_POSITION)) {
-        // The teaching prompt: show the animal where the answer was by putting
-        // water on the correct spout. Drawn only when the feature is on, so with
-        // T3_TEACH_PROB at 0 the random stream is untouched and a scripted trial
-        // sequence stays reproducible.
-        if (T3_TEACH_PROB > 0 && task_rand32() % 100u < T3_TEACH_PROB) {
-          out.push(ACT_REWARD, type_, 0);
-          pending_ = OUTCOME_TEACH;
-          return T3_REWARD;               // shares the consumption period
-        }
+        // Drawn only when the feature is on, so with T3_TEACH_PROB at 0 the
+        // random stream is untouched and a scripted trial sequence stays
+        // reproducible.
+        if (rescueTeach(out)) return T3_REWARD;   // shares the consumption period
         pending_ = OUTCOME_NO_RESPONSE;
         return T3_ITI;
       }
@@ -485,6 +499,9 @@ void DiscriminationTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) 
       recordAnsweredTrial(pending_);
       countTrial(pending_);
       setTimeout(T3_ITI_MS);
+      break;
+    case T3_EARLY_PAUSE:
+      setTimeout(T3_EARLY_LICK_PAUSE_MS);
       break;
     default:
       break;

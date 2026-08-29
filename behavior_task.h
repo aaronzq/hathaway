@@ -118,7 +118,7 @@ unsigned long T3_RESPONSE_MS = 1500;    // how long an answer is accepted for
 unsigned long T3_CONSUME_MS  = 1500;    // drinking time after a hit, from the
                                         // instant the valve is asked to open
 unsigned long T3_PUNISH_MS   = 2000;    // timeout after a wrong spout, ms
-unsigned long T3_ITI_MS      = 250;     // inter-trial interval, ms. Served
+unsigned long T3_ITI_MS      = 2500;    // inter-trial interval, ms. Served
                                         // after every trial, aborts included.
 
 // At most this many consecutive trials of the same type; the next one is then
@@ -157,9 +157,9 @@ unsigned long T3_ANTI_BIAS_WIN = 10;
 unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
 
 // Teaching rescue: the probability, IN PERCENT, that a trial which got no answer
-// is given water at the CORRECT spout anyway, to show the animal where the
-// answer was. 0 disables it. Applies to both ways a trial can go unanswered --
-// the response window closing, and the animal leaving the port during it.
+// after the go cue is given water at the CORRECT spout anyway, to show the
+// animal where the answer was. 0 disables it. Set T3_TEACH_INCLUDE_ABORT to
+// also apply this same chance to trials aborted before the go cue.
 //
 // Booked as OUTCOME_TEACH, never as a hit: nothing was discriminated. It is a
 // softer form of the prompt Guo et al. 2014 give by hand ("water delivery by
@@ -174,11 +174,13 @@ unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
 // Much above 50 and withholding becomes the better strategy outright, and it is
 // tempting well below that.
 unsigned long T3_TEACH_PROB = 0;
+unsigned long T3_TEACH_INCLUDE_ABORT = 0;
 
-// What a lick during the sample or the delay does. 1 = replay the trial from
-// its sample tone, same trial type. 0 = log the lick and ignore it, which is
-// how an animal that cannot yet withhold is trained up.
+// What a lick during the sample or the delay does. 1 = pause briefly, then
+// replay the trial from its sample tone, same trial type. 0 = log the lick and
+// ignore it, which is how an animal that cannot yet withhold is trained up.
 unsigned long T3_EARLY_LICK_PUNISH = 0;
+unsigned long T3_EARLY_LICK_PAUSE_MS = 100;  // quiet pause before replay, ms
 
 // The random source task 3 draws its trial type from. Defined here so the task
 // layer itself stays free of hardware: tools/task_test.cpp defines its own

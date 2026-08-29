@@ -44,7 +44,9 @@ unsigned long T3_ANTI_BIAS_AUTO_ENABLE = 0;
 unsigned long T3_ANTI_BIAS_WIN = 30;
 unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
 unsigned long T3_TEACH_PROB      = 0;
+unsigned long T3_TEACH_INCLUDE_ABORT = 0;
 unsigned long T3_EARLY_LICK_PUNISH = 1;
+unsigned long T3_EARLY_LICK_PAUSE_MS = 100;
 
 // The random source task 3 draws its trial type from. On the firmware this is
 // esp_random(); here it is a scripted ring, so a whole trial SEQUENCE can be
@@ -108,6 +110,8 @@ public:
       if (a.verb == ACT_REWARD)    snprintf(buf, sizeof(buf), "REWARD(%u)", (unsigned)a.a0);
       else if (a.verb == ACT_TONE) snprintf(buf, sizeof(buf), "TONE(%u,%u)",
                                             (unsigned)a.a0, (unsigned)a.a1);
+      else if (a.verb == ACT_TONE_STOP)
+                                   snprintf(buf, sizeof(buf), "STOP");
       else if (a.verb == ACT_TONE_TRAIN)
                                    snprintf(buf, sizeof(buf), "TRAIN(%u)", (unsigned)a.a0);
       else                         snprintf(buf, sizeof(buf), "?%u", a.verb);
@@ -566,23 +570,78 @@ static void test_task3_abort_wins_over_a_simultaneous_lick() {
   check(h.task()->outcomeCount(OUTCOME_ABORT) == 1, "so the trial aborts");
 }
 
+static void test_task3_teach_excludes_abort_by_default() {
+  printf("task 3: T3_TEACH_INCLUDE_ABORT = 0 keeps aborts unrescued\n");
+  unsigned long sp = T3_TEACH_PROB, si = T3_TEACH_INCLUDE_ABORT;
+  T3_TEACH_PROB = 100;
+  T3_TEACH_INCLUDE_ABORT = 0;
+  setRand({0});                            // type 1
+
+  Harness h(taskById(3));
+  h.advance(1);                            // -> SAMPLE1
+  h.advance(trainMs());                    // -> DELAY
+  h.clearTrace();
+
+  h.cycle(0, AWAY);
+  check(h.trace() == "[ITI]", "even at 100% teach probability, abort goes straight to ITI");
+  check(h.task()->outcomeCount(OUTCOME_ABORT) == 1, "booked as ABORT");
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 0, "not as TEACH");
+
+  T3_TEACH_PROB = sp;
+  T3_TEACH_INCLUDE_ABORT = si;
+}
+
+static void test_task3_teach_can_include_abort() {
+  printf("task 3: T3_TEACH_INCLUDE_ABORT = 1 lets T3_TEACH_PROB rescue aborts\n");
+  unsigned long sp = T3_TEACH_PROB, si = T3_TEACH_INCLUDE_ABORT;
+  T3_TEACH_PROB = 100;
+  T3_TEACH_INCLUDE_ABORT = 1;
+  setRand({0, 0});                         // type 1, then rescue draw passes
+
+  Harness h(taskById(3));
+  h.advance(1);                            // -> SAMPLE1
+  h.advance(trainMs());                    // -> DELAY
+  h.clearTrace();
+
+  h.cycle(0, AWAY);
+  check(h.trace() == "[REWARD]REWARD(1)",
+        "leaving before the go cue can be rescued at the correct spout");
+  h.advance(T3_CONSUME_MS);
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 1, "booked as TEACH");
+  check(h.task()->outcomeCount(OUTCOME_ABORT) == 0, "not as ABORT");
+
+  T3_TEACH_PROB = sp;
+  T3_TEACH_INCLUDE_ABORT = si;
+}
+
 static void test_task3_early_lick_replays() {
-  printf("task 3: with T3_EARLY_LICK_PUNISH, a lick in sample or delay replays\n");
+  printf("task 3: with T3_EARLY_LICK_PUNISH, early licks pause before replay\n");
   setRand({0});                            // every draw is type 1
   Harness h(taskById(3));
   h.advance(1);                            // -> SAMPLE1
   h.clearTrace();
 
   h.cycle(EV_LICK2);
+  check(h.trace() == "[EARLY_PAUSE]STOP",
+        "a lick during the sample stops the tone and starts the early-lick pause");
+  h.clearTrace();
+
+  h.advance(T3_EARLY_LICK_PAUSE_MS - 1);
+  check(h.trace() == "", "the sample does not replay before the pause is over");
+  h.advance(1);
   check(h.trace() == "[SAMPLE1]TRAIN(12000)",
-        "a lick during the sample restarts the tone, on either spout");
+        "after the pause, the same sample tone replays");
   h.clearTrace();
 
   h.advance(trainMs());                    // -> DELAY
   h.clearTrace();
   h.cycle(EV_LICK1);
+  check(h.trace() == "[EARLY_PAUSE]STOP",
+        "a lick during the delay starts the same pause before replay");
+  h.clearTrace();
+  h.advance(T3_EARLY_LICK_PAUSE_MS);
   check(h.trace() == "[SAMPLE1]TRAIN(12000)",
-        "a lick during the delay goes back to the sample, same trial type");
+        "delay early-lick replay keeps the same trial type");
   check(h.task()->trial() == 0, "a replay is not a trial outcome");
 }
 
@@ -1188,6 +1247,8 @@ int main() {
   test_task3_no_response_by_leaving();
   test_task3_abort_before_gocue();
   test_task3_abort_wins_over_a_simultaneous_lick();
+  test_task3_teach_excludes_abort_by_default();
+  test_task3_teach_can_include_abort();
   test_task3_early_lick_replays();
   test_task3_early_lick_tolerated();
   test_task3_repeat_cap();

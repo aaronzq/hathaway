@@ -161,6 +161,7 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(T3_N_PULSES,       1,   20,    nullptr),
   PARAM_U32(T3_DELAY_MS,       0,   10000, nullptr),
   PARAM_U32(T3_EARLY_LICK_PUNISH, 0, 1,    nullptr),
+  PARAM_U32(T3_EARLY_LICK_PAUSE_MS, 0, 10000, nullptr),
   PARAM_U32(T3_CUE_FREQ,       100, 20000, nullptr),
   PARAM_U32(T3_CUE_DUR,        1,   5000,  nullptr),
   PARAM_U32(T3_RESPONSE_MS,    1,   30000, nullptr),
@@ -179,6 +180,7 @@ static const CmdSpec CMD_TABLE[] = {
   // Percent chance an unanswered trial is rescued with water at the correct
   // spout. 0 = off. Keep low; see the warning in behavior_task.h.
   PARAM_U32(T3_TEACH_PROB,     0,   100,   nullptr),
+  PARAM_U32(T3_TEACH_INCLUDE_ABORT, 0, 1,   nullptr),
   
   ACTION(TARE, doTare),
 };
@@ -325,6 +327,13 @@ static void act(const ActionQueue &q, uint32_t now) {
         g_toneFreq = a.a0;
         g_toneOn   = true;
         g_pulseOn  = true;
+        break;
+
+      case ACT_TONE_STOP:
+        buzzer.stop();
+        if (g_pulseOn) Comms::emit(TELEM_TONE, 1, 0.0f, now);
+        g_toneOn  = false;
+        g_pulseOn = false;
         break;
 
       case ACT_TONE_TRAIN:

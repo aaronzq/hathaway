@@ -141,19 +141,20 @@ private:
 //  the task stores recent HIT/INCORRECT trials and adjusts the split toward the
 //  type with the higher failure rate; non-answer outcomes do not enter that
 //  history. T3_TEACH_PROB rescues unanswered trials with water at the correct
-//  spout -- booked as OUTCOME_TEACH, never as a hit.
+//  spout -- booked as OUTCOME_TEACH, never as a hit. T3_TEACH_INCLUDE_ABORT
+//  extends that rescue chance to pre-go-cue aborts.
 //
 //  The names here are 1 and 2 throughout, never "left" and "right": the mapping
 //  from spout number to physical side is a property of the rig, not of the code,
 //  and writing it down twice is how the two come to disagree.
 //
 //  EARLY LICKS. T3_EARLY_LICK_PUNISH decides what a lick during the sample or
-//  the delay means. Set (the default), it replays the trial: the machine returns
-//  to this trial's SAMPLE state and starts the tone again, with the SAME trial
-//  type, so the animal cannot resample its way onto an easier trial. Clear, the
-//  lick is logged and otherwise ignored. Licks during the 100 ms go cue are
-//  always ignored -- the cue is the signal to respond, so a lick there is early
-//  by milliseconds, not a strategy.
+//  the delay means. Set, it pauses for T3_EARLY_LICK_PAUSE_MS, then replays the
+//  trial: the machine returns to this trial's SAMPLE state and starts the tone
+//  again, with the SAME trial type, so the animal cannot resample its way onto
+//  an easier trial. Clear (the default), the lick is logged and otherwise
+//  ignored. Licks during the 100 ms go cue are always ignored -- the cue is the
+//  signal to respond, so a lick there is early by milliseconds, not a strategy.
 //
 //  OUTCOMES. Exactly one per completed trial, counted on entry to ITI:
 //    HIT          lick on the correct spout inside the response window
@@ -161,8 +162,9 @@ private:
 //    NO_RESPONSE  the window closed unanswered, OR the animal left the port
 //                 after the go cue without answering
 //    TEACH        as NO_RESPONSE, but rescued: water at the correct spout, on
-//                 T3_TEACH_PROB percent of them
-//    ABORT        the animal left the port before the go cue
+//                 T3_TEACH_PROB percent of them. If T3_TEACH_INCLUDE_ABORT is
+//                 set, pre-go-cue aborts can also be rescued this way
+//    ABORT        the animal left the port before the go cue and was not rescued
 //  Every one of them then serves T3_ITI_MS, aborts included. Discrimination
 //  performance is HIT/(HIT+INCORRECT): TEACH gave water without testing
 //  anything, and TEACH+NO_RESPONSE are the trials that went unanswered.
@@ -178,8 +180,9 @@ private:
 //      RESPONSE  --correct-->     REWARD  (water) --T3_CONSUME_MS--> ITI
 //      RESPONSE  --wrong-->       PUNISH  --T3_PUNISH_MS-->          ITI
 //      RESPONSE  --window shut, or left the port--> REWARD if rescued, else ITI
-//      SAMPLEn | DELAY  --lick, if T3_EARLY_LICK_PUNISH--> SAMPLEn (replay)
-//      SAMPLEn | DELAY | GOCUE  --out of position-->       ITI (abort)
+//      SAMPLEn | DELAY  --lick, if T3_EARLY_LICK_PUNISH--> EARLY_PAUSE
+//      EARLY_PAUSE      --T3_EARLY_LICK_PAUSE_MS-->        SAMPLEn (replay)
+//      SAMPLEn | DELAY | GOCUE | EARLY_PAUSE --out of position--> REWARD if rescued, else ITI
 //      ITI       --T3_ITI_MS-->   IDLE
 // ===========================================================================
 
@@ -193,6 +196,7 @@ enum : uint8_t {
   T3_REWARD,
   T3_PUNISH,
   T3_ITI,
+  T3_EARLY_PAUSE,
   T3_STATE_COUNT,
 };
 
@@ -213,6 +217,7 @@ protected:
 private:
   void     selectType();                  // draw this trial's type, honouring the cap
   uint8_t  effectiveProb1() const;        // probability used before the cap
+  bool     rescueTeach(ActionQueue &out); // maybe water the correct spout
   void     recordAnsweredTrial(uint8_t outcome);
   uint8_t  sampleState() const;           // the SAMPLE state for type_
   uint32_t trainMs() const;               // total length of the sample tone train
