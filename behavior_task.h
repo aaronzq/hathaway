@@ -108,7 +108,7 @@ unsigned long T3_GAP_MS   = 100;        // silence between pulses, ms
 unsigned long T3_N_PULSES = 3;          // pulses per sample
 
 // The working-memory delay. Raised through training: 0 -> 300 -> 600 -> 1200.
-unsigned long T3_DELAY_MS = 0;
+unsigned long T3_DELAY_MS = 100;
 
 unsigned long T3_CUE_FREQ = 6000;       // go cue frequency, Hz
 unsigned long T3_CUE_DUR  = 100;        // go cue duration, ms. The response
@@ -146,6 +146,15 @@ unsigned long T3_MAX_REPEAT = 3;
 // Takes effect at the next trial: the type is chosen as the trial leaves IDLE,
 // so changing this mid-trial never rewrites the trial in progress.
 unsigned long T3_ANTI_BIAS_PROB1 = 50;
+
+// Automatic anti-bias. When enabled, task 3 ignores the manual probability once
+// it has T3_ANTI_BIAS_WIN answered trials (HIT or INCORRECT) in its local
+// history and derives the next type-1 probability from recent type-specific
+// failure rates. Non-answer outcomes do not fill or age that window. Turning
+// this off over serial clears the window, so the next auto run starts cold.
+unsigned long T3_ANTI_BIAS_AUTO_ENABLE = 0;
+unsigned long T3_ANTI_BIAS_WIN = 10;
+unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
 
 // Teaching rescue: the probability, IN PERCENT, that a trial which got no answer
 // is given water at the CORRECT spout anyway, to show the animal where the

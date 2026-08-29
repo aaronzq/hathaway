@@ -40,6 +40,9 @@ unsigned long T3_PUNISH_MS     = 2000;
 unsigned long T3_ITI_MS        = 250;
 unsigned long T3_MAX_REPEAT    = 3;
 unsigned long T3_ANTI_BIAS_PROB1 = 50;
+unsigned long T3_ANTI_BIAS_AUTO_ENABLE = 0;
+unsigned long T3_ANTI_BIAS_WIN = 30;
+unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
 unsigned long T3_TEACH_PROB      = 0;
 unsigned long T3_EARLY_LICK_PUNISH = 1;
 
@@ -416,6 +419,20 @@ static void runNoResponseTrial(Harness &h) {
   h.advance(T3_RESPONSE_MS);                // -> REWARD if rescued, else ITI
   if (h.task()->state() == T3_REWARD) h.advance(T3_CONSUME_MS);
   h.advance(T3_ITI_MS);                     // -> IDLE
+}
+
+static bool takeProb1(Harness &h, uint8_t &prob) {
+  return h.task()->takeT3Prob1(prob);
+}
+
+static void runAnsweredTrial(Harness &h, bool hit) {
+  const uint8_t correct = toResponse(h);
+  const uint32_t ev = hit
+    ? (correct == 1 ? EV_LICK1 : EV_LICK2)
+    : (correct == 1 ? EV_LICK2 : EV_LICK1);
+  h.cycle(ev);
+  h.advance(hit ? T3_CONSUME_MS : T3_PUNISH_MS);
+  h.advance(T3_ITI_MS);
 }
 
 // Count how many of the sample states entered were of one type.
@@ -827,6 +844,257 @@ static void test_task3_zero_delay() {
   T3_DELAY_MS = saved;
 }
 
+static void test_task3_prob1_reports_manual_value() {
+  printf("task 3: T3_PROB1 reports the manual probability when auto is off\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sp = T3_ANTI_BIAS_PROB1;
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  T3_ANTI_BIAS_PROB1 = 80;
+
+  setRand({0});
+  Harness h(taskById(3));
+  h.cycle();
+
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 80,
+        "the one-shot hook reports the manual draw probability");
+  check(!takeProb1(h, prob), "and reports it only once per trial start");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_PROB1 = sp;
+}
+
+static void test_task3_auto_bias_cold_start_is_unbiased() {
+  printf("task 3: automatic anti-bias is 50 until the answered window is full\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  T3_ANTI_BIAS_WIN = 2;
+
+  setRand({0});
+  Harness h(taskById(3));
+  h.cycle();
+
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 50, "cold start reports 50");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+}
+
+static void test_task3_auto_bias_ignores_non_answer_outcomes() {
+  printf("task 3: no-response, abort and teach do not occupy the anti-bias window\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sm = T3_MAX_REPEAT, st = T3_TEACH_PROB;
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  T3_ANTI_BIAS_WIN = 2;
+  T3_ANTI_BIAS_PROB1 = 50;
+  T3_MAX_REPEAT = 100;
+  T3_TEACH_PROB = 0;
+
+  setRand({0, 50, 50, 50, 0, 50, 0});
+  Harness h(taskById(3));
+  runAnsweredTrial(h, true);       // type 1 hit
+  runNoResponseTrial(h);           // type 2 no-response: ignored by the window
+  h.advance(1);                    // type 2 abort: ignored by the window
+  h.cycle(0, AWAY);
+  h.advance(T3_ITI_MS);
+  T3_TEACH_PROB = 100;
+  runNoResponseTrial(h);           // type 2 teach: ignored by the window
+  T3_TEACH_PROB = 0;
+  runAnsweredTrial(h, false);      // type 2 incorrect
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  h.advance(1);
+
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 10,
+        "the filled window contains type-1 hit and type-2 incorrect only");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sm;
+  T3_TEACH_PROB = st;
+}
+
+static void test_task3_auto_bias_accuracy_gate() {
+  printf("task 3: automatic anti-bias returns to 50 once both accuracies pass threshold\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sm = T3_MAX_REPEAT, sth = T3_ANTI_BIAS_ACC_THRESH;
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  T3_ANTI_BIAS_WIN = 2;
+  T3_ANTI_BIAS_PROB1 = 50;
+  T3_MAX_REPEAT = 100;
+  T3_ANTI_BIAS_ACC_THRESH = 65;
+
+  setRand({0, 50, 0});
+  Harness h(taskById(3));
+  runAnsweredTrial(h, true);       // type 1 hit
+  runAnsweredTrial(h, true);       // type 2 hit
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  h.advance(1);
+
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 50, "both sides above criterion gives 50");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sm;
+  T3_ANTI_BIAS_ACC_THRESH = sth;
+}
+
+static void test_task3_auto_bias_requires_both_types_in_window() {
+  printf("task 3: automatic anti-bias is 50 if one type has no answered trials\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sm = T3_MAX_REPEAT;
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  T3_ANTI_BIAS_WIN = 2;
+  T3_ANTI_BIAS_PROB1 = 50;
+  T3_MAX_REPEAT = 100;
+
+  setRand({0, 0, 0});
+  Harness h(taskById(3));
+  runAnsweredTrial(h, false);      // type 1 incorrect
+  runAnsweredTrial(h, false);      // type 1 incorrect again
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  h.advance(1);
+
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 50, "type 2 accuracy is undefined, so use 50");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sm;
+}
+
+static void test_task3_auto_bias_delta_direction_and_clamp() {
+  printf("task 3: failure-rate delta moves probability toward the worse trial type\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sm = T3_MAX_REPEAT;
+  T3_ANTI_BIAS_WIN = 2;
+  T3_ANTI_BIAS_PROB1 = 50;
+  T3_MAX_REPEAT = 100;
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  setRand({0, 50, 0});
+  Harness a(taskById(3));
+  runAnsweredTrial(a, false);      // type 1 incorrect
+  runAnsweredTrial(a, true);       // type 2 hit
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  a.advance(1);
+  uint8_t prob = 0;
+  check(takeProb1(a, prob) && prob == 90, "type 1 worse clamps probability at 90");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  setRand({0, 50, 0});
+  Harness b(taskById(3));
+  runAnsweredTrial(b, true);       // type 1 hit
+  runAnsweredTrial(b, false);      // type 2 incorrect
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  b.advance(1);
+  check(takeProb1(b, prob) && prob == 10, "type 2 worse clamps probability at 10");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sm;
+}
+
+static void test_task3_auto_bias_window_changes_live() {
+  printf("task 3: changing T3_ANTI_BIAS_WIN changes the newest answered trials used\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sm = T3_MAX_REPEAT;
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  T3_ANTI_BIAS_PROB1 = 50;
+  T3_MAX_REPEAT = 100;
+
+  setRand({0, 50, 0, 50, 0, 0});
+  Harness h(taskById(3));
+  runAnsweredTrial(h, true);       // type 1 hit
+  runAnsweredTrial(h, false);      // type 2 incorrect
+  runAnsweredTrial(h, false);      // type 1 incorrect
+  runAnsweredTrial(h, true);       // type 2 hit
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  T3_ANTI_BIAS_WIN = 2;            // newest two: type 1 incorrect, type 2 hit
+  h.advance(1);
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 90, "window 2 sees type 1 as worse");
+
+  h.cycle(0, AWAY);                // abort the probe trial; it does not enter history
+  h.advance(T3_ITI_MS);
+  T3_ANTI_BIAS_WIN = 4;            // all four: both types are 1 hit / 1 incorrect
+  h.advance(1);
+  check(takeProb1(h, prob) && prob == 50, "window 4 sees balanced accuracy");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sm;
+}
+
+static void test_task3_auto_bias_still_obeys_repeat_cap() {
+  printf("task 3: T3_MAX_REPEAT can still force the type after auto probability\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sm = T3_MAX_REPEAT;
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  T3_ANTI_BIAS_WIN = 2;
+  T3_ANTI_BIAS_PROB1 = 50;
+  T3_MAX_REPEAT = 1;
+
+  setRand({0, 50, 0, 0});
+  Harness h(taskById(3));
+  runAnsweredTrial(h, false);      // type 1 incorrect
+  runAnsweredTrial(h, true);       // type 2 hit
+  runAnsweredTrial(h, false);      // type 1 incorrect; last type is now 1
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  h.advance(1);                    // auto probability asks for type 1, cap forces type 2
+
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 90, "auto probability was 90 before the cap");
+  check(h.task()->state() == T3_SAMPLE2, "but strict alternation forced SAMPLE2");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sm;
+}
+
+static void test_task3_auto_bias_clear_history_hook() {
+  printf("task 3: clearing anti-bias history returns auto probability to cold start\n");
+  unsigned long sa = T3_ANTI_BIAS_AUTO_ENABLE, sw = T3_ANTI_BIAS_WIN;
+  unsigned long sp = T3_ANTI_BIAS_PROB1, sm = T3_MAX_REPEAT;
+  T3_ANTI_BIAS_AUTO_ENABLE = 0;
+  T3_ANTI_BIAS_WIN = 2;
+  T3_ANTI_BIAS_PROB1 = 50;
+  T3_MAX_REPEAT = 100;
+
+  setRand({0, 50, 0, 50});
+  Harness h(taskById(3));
+  runAnsweredTrial(h, false);      // type 1 incorrect
+  runAnsweredTrial(h, true);       // type 2 hit
+
+  T3_ANTI_BIAS_AUTO_ENABLE = 1;
+  h.advance(1);
+  uint8_t prob = 0;
+  check(takeProb1(h, prob) && prob == 90, "history is full and biases type 1");
+
+  h.task()->clearT3AntiBiasHistory();
+  h.cycle(0, AWAY);                // abort the probe trial; it does not enter history
+  h.advance(T3_ITI_MS);
+  h.advance(1);
+  check(takeProb1(h, prob) && prob == 50, "cleared history starts auto mode at 50");
+
+  T3_ANTI_BIAS_AUTO_ENABLE = sa;
+  T3_ANTI_BIAS_WIN = sw;
+  T3_ANTI_BIAS_PROB1 = sp;
+  T3_MAX_REPEAT = sm;
+}
+
 
 // ===========================================================================
 //  FRAMEWORK invariants
@@ -933,6 +1201,15 @@ int main() {
   test_task3_simultaneous_licks_score_a_hit();
   test_task3_outcomes_account_for_every_trial();
   test_task3_zero_delay();
+  test_task3_prob1_reports_manual_value();
+  test_task3_auto_bias_cold_start_is_unbiased();
+  test_task3_auto_bias_ignores_non_answer_outcomes();
+  test_task3_auto_bias_accuracy_gate();
+  test_task3_auto_bias_requires_both_types_in_window();
+  test_task3_auto_bias_delta_direction_and_clamp();
+  test_task3_auto_bias_window_changes_live();
+  test_task3_auto_bias_still_obeys_repeat_cap();
+  test_task3_auto_bias_clear_history_hook();
 
   test_switch_safety();
   test_reset_is_clean();

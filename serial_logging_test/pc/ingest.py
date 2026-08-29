@@ -99,6 +99,7 @@ KNOWN_KINDS = {
     # panel that reads `samples`.
     "TONE": "S",      # frequency Hz while sounding, 0 when silent
     "TASK": "S",      # id of the running task
+    "T3_PROB1": "S",  # effective type-1 draw probability used by task 3
     "STATE": "E",     # state entered; channel = state index
     "OUTCOME": "E",   # trial ended; channel = OUTCOME_* code
 }

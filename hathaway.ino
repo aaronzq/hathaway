@@ -82,6 +82,7 @@ enum : uint8_t {
   TELEM_STATE,    // channel = state index (0-based), value = trial number
   TELEM_TASK,     // channel = task id,     value = task id
   TELEM_OUTCOME,  // channel = OUTCOME_* code (0-based), value = trial number
+  TELEM_T3_PROB1, // channel 1, value = effective type-1 draw probability %
 };
 
 static const TelemSpec TELEM_TABLE[] = {
@@ -100,6 +101,8 @@ static const TelemSpec TELEM_TABLE[] = {
   // The channel is the OUTCOME_* code, so hit / incorrect / no-response / abort
   // rates come straight out of a GROUP BY on channel.
   { TELEM_OUTCOME,  "OUTCOME",  TELEM_EVENT  },
+  // Task-3-only state sample: the probability fed into that trial's type draw.
+  { TELEM_T3_PROB1, "T3_PROB1", TELEM_SAMPLE },
 };
 static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 
@@ -118,6 +121,12 @@ static void applyRewardDuration2(float v) { rewarder2.setRewardDuration((unsigne
 static void applyMagFixDuration(float v)  { magnet.setFixDuration((unsigned long)v); }
 static void applyMagGrace(float v)        { magnet.setGraceDuration((unsigned long)v); }
 static void applyBuzPulseWidth(float v)   { buzzer.setPulseWidth((uint8_t)v); }
+static void applyT3AntiBiasAuto(float v)  {
+  if ((unsigned long)v == 0) {
+    Task *t3 = taskById(3);
+    if (t3 != nullptr) t3->clearT3AntiBiasHistory();
+  }
+}
 static void doTare(float)                 { scale.tare(); }   // blocks ~1 s
 
 static const CmdSpec CMD_TABLE[] = {
@@ -164,6 +173,9 @@ static const CmdSpec CMD_TABLE[] = {
   // Percent chance a trial is type 1; type 2 gets the rest. 50 = unbiased.
   // Capped in practice by T3_MAX_REPEAT -- see behavior_task.h.
   PARAM_U32(T3_ANTI_BIAS_PROB1, 0,  100,   nullptr),
+  PARAM_U32(T3_ANTI_BIAS_AUTO_ENABLE, 0, 1, applyT3AntiBiasAuto),
+  PARAM_U32(T3_ANTI_BIAS_WIN,   1,   100,   nullptr),
+  PARAM_U32(T3_ANTI_BIAS_ACC_THRESH, 0, 100, nullptr),
   // Percent chance an unanswered trial is rescued with water at the correct
   // spout. 0 = off. Keep low; see the warning in behavior_task.h.
   PARAM_U32(T3_TEACH_PROB,     0,   100,   nullptr),
@@ -415,6 +427,10 @@ void loop() {
   uint32_t trialsB = g_task->trial();
   g_actions.clear();
   g_task->step(in, g_actions);                               // 2. DECIDE
+
+  uint8_t t3Prob1;
+  if (g_task->takeT3Prob1(t3Prob1))
+    Comms::emit(TELEM_T3_PROB1, 1, (float)t3Prob1, in.now);
 
   // Log the state entered before the actions it triggered, so the log reads in
   // causal order. A counter rather than a state comparison, so that re-entering

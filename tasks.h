@@ -129,18 +129,19 @@ private:
 //
 //  TRIAL TYPE. Drawn on arrival at the port: type 1 (T3_SAMPLE_FREQ1, correct
 //  answer = spout 1) or type 2 (T3_SAMPLE_FREQ2, correct answer = spout 2). The
-//  split is T3_ANTI_BIAS_PROB1 percent type 1, except that the same type cannot
-//  run more than T3_MAX_REPEAT times in a row, so an animal cannot do well by
-//  always licking one side. The draw comes from task_rand32(), which the sketch
-//  backs with the hardware RNG and the host test backs with a scripted sequence.
+//  split is the effective type-1 probability: manual T3_ANTI_BIAS_PROB1 unless
+//  automatic anti-bias is enabled and its answered-trial window is full. The
+//  same type still cannot run more than T3_MAX_REPEAT times in a row, so an
+//  animal cannot do well by always licking one side. The draw comes from
+//  task_rand32(), which the sketch backs with the hardware RNG and the host test
+//  backs with a scripted sequence.
 //
-//  ANTI-BIAS. Three mechanisms, in order of bluntness. T3_MAX_REPEAT caps runs
-//  and needs no attention. T3_ANTI_BIAS_PROB1 skews the split towards the type
-//  the animal neglects; the cap still wins, which bounds the achievable skew to
-//  N/(N+1). T3_TEACH_PROB rescues unanswered trials with water at the correct
-//  spout, guiding the animal to the side it is ignoring -- booked as
-//  OUTCOME_TEACH, never as a hit. All three are set by the operator from the
-//  control panel; none of them adapts on its own.
+//  ANTI-BIAS. T3_MAX_REPEAT caps runs and needs no attention. Manual
+//  T3_ANTI_BIAS_PROB1 skews the split when auto mode is off. With auto mode on,
+//  the task stores recent HIT/INCORRECT trials and adjusts the split toward the
+//  type with the higher failure rate; non-answer outcomes do not enter that
+//  history. T3_TEACH_PROB rescues unanswered trials with water at the correct
+//  spout -- booked as OUTCOME_TEACH, never as a hit.
 //
 //  The names here are 1 and 2 throughout, never "left" and "right": the mapping
 //  from spout number to physical side is a property of the rig, not of the code,
@@ -202,6 +203,8 @@ public:
   const char *stateName(uint8_t s) const override;
   bool        safeToSwitch() const override { return state() == T3_IDLE; }
   void        reset(uint32_t now) override;   // also clears the repeat history
+  bool        takeT3Prob1(uint8_t &prob) override;
+  void        clearT3AntiBiasHistory() override;
 
 protected:
   uint8_t onEvent(uint8_t s, const Inputs &in, ActionQueue &out) override;
@@ -209,13 +212,26 @@ protected:
 
 private:
   void     selectType();                  // draw this trial's type, honouring the cap
+  uint8_t  effectiveProb1() const;        // probability used before the cap
+  void     recordAnsweredTrial(uint8_t outcome);
   uint8_t  sampleState() const;           // the SAMPLE state for type_
   uint32_t trainMs() const;               // total length of the sample tone train
+
+  struct AnsweredTrial {
+    uint8_t type;
+    uint8_t outcome;
+  };
+  static const uint8_t ANTI_BIAS_CAP = 100;
 
   uint8_t type_       = 1;   // trial type of the trial in progress (1 or 2)
   uint8_t lastType_   = 0;   // type of the previous trial (0 = none yet)
   uint8_t runLen_     = 0;   // how many trials in a row have been lastType_
   uint8_t pending_    = OUTCOME_ABORT;   // outcome to book when ITI is entered
+  AnsweredTrial hist_[ANTI_BIAS_CAP];
+  uint8_t histHead_   = 0;   // next history slot to write
+  uint8_t histCount_  = 0;   // answered trials currently stored
+  uint8_t drawProb1_  = 50;  // probability used for the latest type draw
+  bool    prob1Ready_ = false;
 };
 
 

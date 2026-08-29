@@ -30,6 +30,9 @@ extern unsigned long T3_PUNISH_MS;
 extern unsigned long T3_ITI_MS;
 extern unsigned long T3_MAX_REPEAT;
 extern unsigned long T3_ANTI_BIAS_PROB1;
+extern unsigned long T3_ANTI_BIAS_AUTO_ENABLE;
+extern unsigned long T3_ANTI_BIAS_WIN;
+extern unsigned long T3_ANTI_BIAS_ACC_THRESH;
 extern unsigned long T3_TEACH_PROB;
 extern unsigned long T3_EARLY_LICK_PUNISH;
 
@@ -39,6 +42,16 @@ extern unsigned long T3_EARLY_LICK_PUNISH;
 // sequence in tools/task_test.cpp. That indirection is what keeps this file
 // hardware-free and keeps the trial sequence exactly reproducible under test.
 extern uint32_t task_rand32();
+
+static uint8_t clampPercent(unsigned long v) {
+  return (v > 100) ? 100 : (uint8_t)v;
+}
+
+static uint8_t clampAutoProb(int v) {
+  if (v < 10) return 10;
+  if (v > 90) return 90;
+  return (uint8_t)v;
+}
 
 
 // ===========================================================================
@@ -218,10 +231,25 @@ const char *DiscriminationTask::stateName(uint8_t s) const {
 
 void DiscriminationTask::reset(uint32_t now) {
   Task::reset(now);
-  type_     = 1;
-  lastType_ = 0;      // no history, so the first draw is never forced
-  runLen_   = 0;
-  pending_  = OUTCOME_ABORT;
+  type_       = 1;
+  lastType_   = 0;      // no history, so the first draw is never forced
+  runLen_     = 0;
+  pending_    = OUTCOME_ABORT;
+  clearT3AntiBiasHistory();
+  drawProb1_  = 50;
+  prob1Ready_ = false;
+}
+
+bool DiscriminationTask::takeT3Prob1(uint8_t &prob) {
+  if (!prob1Ready_) return false;
+  prob = drawProb1_;
+  prob1Ready_ = false;
+  return true;
+}
+
+void DiscriminationTask::clearT3AntiBiasHistory() {
+  histHead_  = 0;
+  histCount_ = 0;
 }
 
 uint8_t DiscriminationTask::sampleState() const {
@@ -236,16 +264,18 @@ uint32_t DiscriminationTask::trainMs() const {
   return T3_N_PULSES * T3_PULSE_MS + (T3_N_PULSES - 1) * T3_GAP_MS;
 }
 
-// T3_ANTI_BIAS_PROB1 percent of trials are type 1 and the rest type 2, except
-// that T3_MAX_REPEAT identical trials in a row force the other type next. The
-// cap always wins, which is what bounds the achievable bias to N/(N+1) -- see
-// the note on T3_MAX_REPEAT in behavior_task.h. Without the cap a fair coin
-// still produces long runs, and an animal that has just been rewarded four
-// times on spout 1 learns the wrong lesson from the fifth.
+// The effective type-1 probability is manual T3_ANTI_BIAS_PROB1 unless auto
+// anti-bias is enabled and its answered-trial window is full. T3_MAX_REPEAT
+// still runs after the draw and can force the other type next. The cap always
+// wins, which is what bounds the achievable bias to N/(N+1) -- see the note on
+// T3_MAX_REPEAT in behavior_task.h.
 void DiscriminationTask::selectType() {
+  drawProb1_  = effectiveProb1();
+  prob1Ready_ = true;
+
   // Modulo 100 of a uint32 is biased by about two parts in 10^8, which is some
   // ten thousand times smaller than the sampling noise in a 400-trial session.
-  uint8_t t = (task_rand32() % 100u < T3_ANTI_BIAS_PROB1) ? 1 : 2;
+  uint8_t t = (task_rand32() % 100u < drawProb1_) ? 1 : 2;
 
   if (t == lastType_ && runLen_ >= T3_MAX_REPEAT) {
     t = (t == 1) ? 2 : 1;                 // the cap overrides the draw
@@ -261,6 +291,51 @@ void DiscriminationTask::selectType() {
     runLen_   = 1;
   }
   type_ = t;
+}
+
+uint8_t DiscriminationTask::effectiveProb1() const {
+  if (!T3_ANTI_BIAS_AUTO_ENABLE) return clampPercent(T3_ANTI_BIAS_PROB1);
+
+  uint8_t win = (T3_ANTI_BIAS_WIN > ANTI_BIAS_CAP)
+                  ? ANTI_BIAS_CAP : (uint8_t)T3_ANTI_BIAS_WIN;
+  if (win < 1) win = 1;
+  if (histCount_ < win) return 50;
+
+  uint8_t hit1 = 0, inc1 = 0, hit2 = 0, inc2 = 0;
+  uint8_t idx = (uint8_t)((histHead_ + ANTI_BIAS_CAP - win) % ANTI_BIAS_CAP);
+  for (uint8_t i = 0; i < win; i++) {
+    const AnsweredTrial &h = hist_[idx];
+    if (h.type == 1) {
+      if (h.outcome == OUTCOME_HIT) hit1++;
+      else if (h.outcome == OUTCOME_INCORRECT) inc1++;
+    } else if (h.type == 2) {
+      if (h.outcome == OUTCOME_HIT) hit2++;
+      else if (h.outcome == OUTCOME_INCORRECT) inc2++;
+    }
+    idx = (uint8_t)((idx + 1) % ANTI_BIAS_CAP);
+  }
+
+  const uint8_t n1 = hit1 + inc1;
+  const uint8_t n2 = hit2 + inc2;
+  if (n1 == 0 || n2 == 0) return 50;
+
+  const float acc1 = (float)hit1 / (float)n1;
+  const float acc2 = (float)hit2 / (float)n2;
+  const float thresh = (float)clampPercent(T3_ANTI_BIAS_ACC_THRESH) / 100.0f;
+  if (acc1 >= thresh && acc2 >= thresh) return 50;
+
+  const float delta = (1.0f - acc1) - (1.0f - acc2);
+  const int prob = (int)(50.0f + 50.0f * delta + 0.5f);
+  return clampAutoProb(prob);
+}
+
+void DiscriminationTask::recordAnsweredTrial(uint8_t outcome) {
+  if (outcome != OUTCOME_HIT && outcome != OUTCOME_INCORRECT) return;
+
+  hist_[histHead_].type = type_;
+  hist_[histHead_].outcome = outcome;
+  histHead_ = (uint8_t)((histHead_ + 1) % ANTI_BIAS_CAP);
+  if (histCount_ < ANTI_BIAS_CAP) histCount_++;
 }
 
 uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
@@ -407,6 +482,7 @@ void DiscriminationTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) 
       // The single place a task-3 trial is booked. Every route out of a trial
       // passes through here, which is what makes the four outcome counts add up
       // to trial() by construction rather than by inspection.
+      recordAnsweredTrial(pending_);
       countTrial(pending_);
       setTimeout(T3_ITI_MS);
       break;

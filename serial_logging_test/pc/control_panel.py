@@ -73,6 +73,8 @@ class RigState:
         # parameter ever disappears from the UI mid-dump.
         self.param_dump = None
         self.weight_buf = deque(maxlen=WEIGHT_AVG_N)  # raw weights for the moving avg
+        self.active_task = None               # TASK telemetry: the task actually running
+        self.t3_prob1 = None                  # latest effective task-3 type-1 probability
         self.counts = defaultdict(int)        # e.g. "LICK1", "REWARD2"
         self.dropped = 0
         self.last_seen = None                 # epoch seconds
@@ -91,6 +93,8 @@ class RigState:
             "err": self.err,
             "params": dict(self.params),       # copied: a reader thread may swap it
             "weight": self.weight_avg(),      # moving average (display only)
+            "active_task": self.active_task,
+            "t3_prob1": self.t3_prob1,
             "counts": dict(self.counts),
             "dropped": self.dropped,
             "last_seen": self.last_seen,
@@ -375,6 +379,12 @@ class Controller:
         for r in recs:
             if r["type"] == "WEIGHT":
                 st.weight_buf.append(r["value"])   # feed the moving average
+            if r["type"] == "TASK":
+                st.active_task = int(r["value"])
+                if st.active_task != 3:
+                    st.t3_prob1 = None
+            if r["type"] == "T3_PROB1":
+                st.t3_prob1 = r["value"]
             if r["kind"] == "E":
                 ch = r["channel"] or ""
                 st.counts[f'{r["type"]}{ch}'] += 1
@@ -606,6 +616,7 @@ HTML_PAGE = """<!doctype html>
        text-align:center;border-left:1px solid rgba(140,160,180,.12);padding-left:16px}
  .hero .rig{font-size:14px;color:#8b93a2;letter-spacing:1px}
  .hero .w{font-size:clamp(24px,3vw,40px);font-weight:600;color:#e8eef4;line-height:1.15;margin-top:4px}
+ .hero .w.small{font-size:clamp(20px,2.2vw,30px);margin-top:14px}
  .hero .wl{font-size:12px;color:#8b93a2;margin-top:2px}
  #ctllog{flex:1;min-height:60px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;
       color:#8fa0ac;white-space:pre-wrap;background:#0b111b;border:1px solid rgba(140,160,180,.12);
@@ -673,6 +684,10 @@ HTML_PAGE = """<!doctype html>
         <div class="rig" id="heroRig">&mdash;</div>
         <div class="w" id="ctlweight">&mdash;</div>
         <div class="wl">weight</div>
+        <div id="t3probBox" style="display:none">
+          <div class="w small" id="ctlt3prob">&mdash;</div>
+          <div class="wl">T3 prob1</div>
+        </div>
         <div style="margin-top:10px"><button id="tarebtn">Tare</button></div>
       </div>
     </div>
@@ -765,8 +780,10 @@ function renderControl(state){
   document.getElementById('ctl').style.display=has?'block':'none';
   document.getElementById('ctlnone').style.display=has?'none':'block';
   const hero=document.getElementById('heroRig'), w=document.getElementById('ctlweight'),
+        pbox=document.getElementById('t3probBox'), prob=document.getElementById('ctlt3prob'),
         cp=document.getElementById('ctlport'), lg=document.getElementById('ctllog');
-  if(!has){cp.innerHTML='&mdash;';hero.innerHTML='&mdash;';w.innerHTML='&mdash;';lg.textContent='';return;}
+  if(!has){cp.innerHTML='&mdash;';hero.innerHTML='&mdash;';w.innerHTML='&mdash;';
+    prob.innerHTML='&mdash;';pbox.style.display='none';lg.textContent='';return;}
   const rig=Number(selectedRig);
   cp.textContent=rigPort[rig];
   hero.textContent='RIG '+rig;
@@ -777,6 +794,10 @@ function renderControl(state){
   const r=state.rigs[rig]||{};
   w.textContent=(r.weight!=null)?(r.weight+' g'):'\\u2014';
   const params=r.params||{};
+  const paramTask=Number(params['TASK']);
+  const activeTask=(r.active_task!=null)?Number(r.active_task):paramTask;
+  pbox.style.display=(activeTask===3)?'block':'none';
+  prob.textContent=(activeTask===3&&r.t3_prob1!=null)?(Math.round(r.t3_prob1)+'%'):'\\u2014';
   Object.keys(params).forEach(function(name){
     ensureCtlRow(rig,name);
     ctlRows[name].querySelector('[data-cur]').textContent=params[name];});
@@ -788,7 +809,7 @@ function renderControl(state){
   // Show only the running task's parameters. Until the rig reports TASK, cur is
   // undefined and every T<n>_ row stays hidden -- better than showing all three
   // tasks' parameters at once and letting the operator set one that is not live.
-  const cur=Number(params['TASK']);
+  const cur=paramTask;
   Object.keys(ctlRows).forEach(function(n){
     const t=Number(ctlRows[n].dataset.task);
     ctlRows[n].style.display=(t===0||t===cur)?'':'none';});

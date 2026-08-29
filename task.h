@@ -183,6 +183,12 @@ public:
   virtual uint8_t     stateCount() const = 0;
   virtual const char *stateName(uint8_t s) const = 0;
 
+  // Optional task-specific one-shot telemetry hooks. The base class returns
+  // false so the sketch can poll the active task without knowing its concrete
+  // type.
+  virtual bool takeT3Prob1(uint8_t &prob) { (void)prob; return false; }
+  virtual void clearT3AntiBiasHistory() {}
+
   // True only when the task is at a trial boundary. The sketch defers a
   // requested task switch until this returns true, so a switch can never land
   // in the middle of a trial.
