@@ -34,6 +34,7 @@ unsigned long REWARD_DURATION1 = 63;    // spout 1 solenoid open time, ms
 unsigned long REWARD_DURATION2 = 55;    // spout 2 solenoid open time, ms
 unsigned long REWARD_INTERVAL1 = 3000;  // refractory after a spout-1 reward, ms
 unsigned long REWARD_INTERVAL2 = 3000;  // refractory after a spout-2 reward, ms
+unsigned long LICK_DEBOUNCE_TIME = 20;  // lick detector debounce, ms
 // Buzzer PWM duty cycle, percent. 50 is the plain square wave; away from it the
 // tone gets quieter and reedier without changing pitch. 0 is silence that still
 // logs and still ends with EV_TONE_DONE.

@@ -10,8 +10,17 @@
 typedef void *QueueHandle_t;
 typedef void *TaskHandle_t;
 #define pdTRUE 1
+#define INPUT 0
+#define LOW 0
+#define HIGH 1
 
-inline uint32_t millis() { return 12345; }
+inline uint32_t g_arduinoMillis = 12345;
+inline int g_pinValues[64] = {};
+
+inline uint32_t millis() { return g_arduinoMillis; }
+inline int digitalRead(int pin) { return g_pinValues[pin]; }
+inline void digitalWrite(int pin, int value) { g_pinValues[pin] = value; }
+inline void pinMode(int, int) {}
 
 // Serial: captures everything written so the test can compare it.
 extern std::string g_serialOut;

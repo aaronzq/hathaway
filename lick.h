@@ -8,7 +8,7 @@
 // ``polarity`` defines the on state of the detector (HIGH or LOW).
 // ---------------------------------------------------------------------------
 
-#define LICK_DEBOUNCE_TIME 20
+extern unsigned long LICK_DEBOUNCE_TIME;
 
 class LickHandler {
 public:
@@ -18,6 +18,7 @@ public:
 
     bool update();
     bool getState() const;
+    void setDebounceTime(unsigned long delay);
 
 private:
     int        PIN;

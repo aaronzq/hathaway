@@ -28,3 +28,8 @@ bool Debouncer::getState() const
 {
     return state;
 }
+
+void Debouncer::setDelay(unsigned long delay)
+{
+    debounceDelay = delay;
+}

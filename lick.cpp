@@ -24,3 +24,8 @@ bool LickHandler::getState() const
 {
     return debouncer.getState();
 }
+
+void LickHandler::setDebounceTime(unsigned long delay)
+{
+    debouncer.setDelay(delay);
+}

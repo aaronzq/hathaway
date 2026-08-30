@@ -118,6 +118,10 @@ static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 
 static void applyRewardDuration1(float v) { rewarder1.setRewardDuration((unsigned long)v); }
 static void applyRewardDuration2(float v) { rewarder2.setRewardDuration((unsigned long)v); }
+static void applyLickDebounceTime(float v) {
+  lick1.setDebounceTime((unsigned long)v);
+  lick2.setDebounceTime((unsigned long)v);
+}
 static void applyMagFixDuration(float v)  { magnet.setFixDuration((unsigned long)v); }
 static void applyMagGrace(float v)        { magnet.setGraceDuration((unsigned long)v); }
 static void applyBuzPulseWidth(float v)   { buzzer.setPulseWidth((uint8_t)v); }
@@ -134,6 +138,7 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(REWARD_DURATION2,  0,   1000,  applyRewardDuration2),
   PARAM_U32(REWARD_INTERVAL1,  0,   60000, nullptr),
   PARAM_U32(REWARD_INTERVAL2,  0,   60000, nullptr),
+  PARAM_U32(LICK_DEBOUNCE_TIME, 0,  100,   applyLickDebounceTime),
   PARAM_U32(MAG_FIX_DURATION,  0,   60000, applyMagFixDuration),
   PARAM_U32(MAG_GRACE_MS,      0,   60000, applyMagGrace),
   PARAM_U32(BUZ_PULSE_WIDTH,   0,   100,   applyBuzPulseWidth),

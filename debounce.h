@@ -16,6 +16,7 @@ public:
 
     bool update();
     bool getState() const;
+    void setDelay(unsigned long delay);
 
 private:
     int pin;
