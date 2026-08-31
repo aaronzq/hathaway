@@ -110,8 +110,6 @@ public:
       if (a.verb == ACT_REWARD)    snprintf(buf, sizeof(buf), "REWARD(%u)", (unsigned)a.a0);
       else if (a.verb == ACT_TONE) snprintf(buf, sizeof(buf), "TONE(%u,%u)",
                                             (unsigned)a.a0, (unsigned)a.a1);
-      else if (a.verb == ACT_TONE_STOP)
-                                   snprintf(buf, sizeof(buf), "STOP");
       else if (a.verb == ACT_TONE_TRAIN)
                                    snprintf(buf, sizeof(buf), "TRAIN(%u)", (unsigned)a.a0);
       else                         snprintf(buf, sizeof(buf), "?%u", a.verb);
@@ -559,10 +557,11 @@ static void test_task3_abort_before_gocue() {
 }
 
 static void test_task3_abort_wins_over_a_simultaneous_lick() {
-  printf("task 3: a lick on the cycle the mouse leaves is an abort, not a replay\n");
+  printf("task 3: a lick on the cycle the mouse leaves is an abort, not a pause\n");
   setRand({0});
   Harness h(taskById(3));
   h.advance(1);                            // -> SAMPLE1
+  h.advance(trainMs());                    // -> DELAY
   h.clearTrace();
 
   h.cycle(EV_LICK1, AWAY);
@@ -614,35 +613,36 @@ static void test_task3_teach_can_include_abort() {
   T3_TEACH_INCLUDE_ABORT = si;
 }
 
-static void test_task3_early_lick_replays() {
-  printf("task 3: with T3_EARLY_LICK_PUNISH, early licks pause before replay\n");
+static void test_task3_early_lick_pauses_delay_only() {
+  printf("task 3: T3_EARLY_LICK_PUNISH pauses only delay licks, then resumes delay\n");
   setRand({0});                            // every draw is type 1
   Harness h(taskById(3));
   h.advance(1);                            // -> SAMPLE1
   h.clearTrace();
 
   h.cycle(EV_LICK2);
-  check(h.trace() == "[EARLY_PAUSE]STOP",
-        "a lick during the sample stops the tone and starts the early-lick pause");
-  h.clearTrace();
-
-  h.advance(T3_EARLY_LICK_PAUSE_MS - 1);
-  check(h.trace() == "", "the sample does not replay before the pause is over");
-  h.advance(1);
-  check(h.trace() == "[SAMPLE1]TRAIN(12000)",
-        "after the pause, the same sample tone replays");
+  check(h.trace() == "", "a lick during the sample is logged but does not punish");
   h.clearTrace();
 
   h.advance(trainMs());                    // -> DELAY
+  h.advance(400);                          // 800 ms of the delay remains
   h.clearTrace();
+
   h.cycle(EV_LICK1);
-  check(h.trace() == "[EARLY_PAUSE]STOP",
-        "a lick during the delay starts the same pause before replay");
+  check(h.trace() == "[EARLY_PAUSE]",
+        "a lick during the delay starts the early-lick pause");
   h.clearTrace();
+
   h.advance(T3_EARLY_LICK_PAUSE_MS);
-  check(h.trace() == "[SAMPLE1]TRAIN(12000)",
-        "delay early-lick replay keeps the same trial type");
-  check(h.task()->trial() == 0, "a replay is not a trial outcome");
+  check(h.trace() == "[DELAY]", "after the pause, the delay resumes");
+  h.clearTrace();
+
+  h.advance(799);
+  check(h.trace() == "", "the go cue does not arrive before the remaining delay is served");
+  h.advance(1);
+  check(h.trace() == "[GOCUE]TONE(6000,100)",
+        "the go cue arrives after pause plus the original remaining delay");
+  check(h.task()->trial() == 0, "the pause is not a trial outcome");
 }
 
 static void test_task3_early_lick_tolerated() {
@@ -1249,7 +1249,7 @@ int main() {
   test_task3_abort_wins_over_a_simultaneous_lick();
   test_task3_teach_excludes_abort_by_default();
   test_task3_teach_can_include_abort();
-  test_task3_early_lick_replays();
+  test_task3_early_lick_pauses_delay_only();
   test_task3_early_lick_tolerated();
   test_task3_repeat_cap();
   test_task3_prob1_drives_the_split();

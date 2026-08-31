@@ -238,6 +238,9 @@ void DiscriminationTask::reset(uint32_t now) {
   lastType_   = 0;      // no history, so the first draw is never forced
   runLen_     = 0;
   pending_    = OUTCOME_ABORT;
+  delaySegmentMs_ = 0;
+  delayLeft_      = 0;
+  resumingDelay_  = false;
   clearT3AntiBiasHistory();
   drawProb1_  = 50;
   prob1Ready_ = false;
@@ -356,7 +359,7 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
   // EV_SWITCH_OFF for the same reason as task 2 -- an edge seen on a cycle the
   // task was not looking would otherwise leave the trial running with nobody
   // at the port. Checked before anything else so that a lick arriving on the
-  // very cycle the animal leaves cannot replay a trial it has walked out of.
+  // very cycle the animal leaves cannot pause a trial it has walked out of.
   switch (s) {
     case T3_SAMPLE1:
     case T3_SAMPLE2:
@@ -386,25 +389,21 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
 
     case T3_SAMPLE1:
     case T3_SAMPLE2:
-      if (licked && T3_EARLY_LICK_PUNISH) {
-        out.push(ACT_TONE_STOP);
-        return T3_EARLY_PAUSE;
-      }
       if (in.has(EV_TIMEOUT)) return T3_DELAY;
       return STAY;
 
     case T3_DELAY:
       if (licked && T3_EARLY_LICK_PUNISH) {
-        out.push(ACT_TONE_STOP);
+        uint32_t elapsed = stateElapsed();
+        delayLeft_ = (elapsed >= delaySegmentMs_) ? 0 : delaySegmentMs_ - elapsed;
+        resumingDelay_ = true;
         return T3_EARLY_PAUSE;
       }
       if (in.has(EV_TIMEOUT)) return T3_GOCUE;
       return STAY;
 
     case T3_EARLY_PAUSE:
-      // Replays from the sample, not from the delay: the animal has to hear the
-      // tone again, which is the point of the punishment.
-      if (in.has(EV_TIMEOUT)) return sampleState();
+      if (in.has(EV_TIMEOUT)) return T3_DELAY;
       return STAY;
 
     case T3_GOCUE:
@@ -474,7 +473,9 @@ void DiscriminationTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) 
       setTimeout(trainMs());
       break;
     case T3_DELAY:
-      setTimeout(T3_DELAY_MS);
+      delaySegmentMs_ = resumingDelay_ ? delayLeft_ : T3_DELAY_MS;
+      resumingDelay_ = false;
+      setTimeout(delaySegmentMs_);
       break;
     case T3_GOCUE:
       out.push(ACT_TONE, T3_CUE_FREQ, T3_CUE_DUR);

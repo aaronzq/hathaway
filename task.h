@@ -88,7 +88,6 @@ struct Inputs {
 enum : uint8_t {
   ACT_REWARD,      // a0 = spout (1 or 2), a1 = open ms (0 = that spout's default)
   ACT_TONE,        // a0 = frequency Hz,   a1 = duration ms
-  ACT_TONE_STOP,   // silence any note or train that is currently playing
   // A pulsed tone: a0 = frequency Hz, and the pulse width, gap and count come
   // from the tunables the sketch reads in act(). They are deliberately NOT in
   // a0/a1 -- an Action carries two arguments, and widening it for one verb

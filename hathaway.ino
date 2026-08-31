@@ -334,13 +334,6 @@ static void act(const ActionQueue &q, uint32_t now) {
         g_pulseOn  = true;
         break;
 
-      case ACT_TONE_STOP:
-        buzzer.stop();
-        if (g_pulseOn) Comms::emit(TELEM_TONE, 1, 0.0f, now);
-        g_toneOn  = false;
-        g_pulseOn = false;
-        break;
-
       case ACT_TONE_TRAIN:
         // The pulse shape comes from the tunables rather than from the Action,
         // which carries only two arguments. tasks.cpp computes the train's

@@ -38,7 +38,7 @@ unsigned long LICK_DEBOUNCE_TIME = 20;  // lick detector debounce, ms
 // Buzzer PWM duty cycle, percent. 50 is the plain square wave; away from it the
 // tone gets quieter and reedier without changing pitch. 0 is silence that still
 // logs and still ends with EV_TONE_DONE.
-unsigned long BUZ_PULSE_WIDTH = 50;
+unsigned long BUZ_PULSE_WIDTH = 25;
 
 unsigned long MAG_FIX_DURATION = 5000;
 // Load-cell halts are ignored for this long after the magnet turns on, ms.
@@ -109,7 +109,7 @@ unsigned long T3_GAP_MS   = 100;        // silence between pulses, ms
 unsigned long T3_N_PULSES = 3;          // pulses per sample
 
 // The working-memory delay. Raised through training: 0 -> 300 -> 600 -> 1200.
-unsigned long T3_DELAY_MS = 100;
+unsigned long T3_DELAY_MS = 300;
 
 unsigned long T3_CUE_FREQ = 6000;       // go cue frequency, Hz
 unsigned long T3_CUE_DUR  = 100;        // go cue duration, ms. The response
@@ -119,7 +119,7 @@ unsigned long T3_RESPONSE_MS = 1500;    // how long an answer is accepted for
 unsigned long T3_CONSUME_MS  = 1500;    // drinking time after a hit, from the
                                         // instant the valve is asked to open
 unsigned long T3_PUNISH_MS   = 2000;    // timeout after a wrong spout, ms
-unsigned long T3_ITI_MS      = 2500;    // inter-trial interval, ms. Served
+unsigned long T3_ITI_MS      = 250;    // inter-trial interval, ms. Served
                                         // after every trial, aborts included.
 
 // At most this many consecutive trials of the same type; the next one is then
@@ -155,7 +155,7 @@ unsigned long T3_ANTI_BIAS_PROB1 = 50;
 // this off over serial clears the window, so the next auto run starts cold.
 unsigned long T3_ANTI_BIAS_AUTO_ENABLE = 0;
 unsigned long T3_ANTI_BIAS_WIN = 10;
-unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
+unsigned long T3_ANTI_BIAS_ACC_THRESH = 75;
 
 // Teaching rescue: the probability, IN PERCENT, that a trial which got no answer
 // after the go cue is given water at the CORRECT spout anyway, to show the
@@ -177,11 +177,11 @@ unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
 unsigned long T3_TEACH_PROB = 0;
 unsigned long T3_TEACH_INCLUDE_ABORT = 0;
 
-// What a lick during the sample or the delay does. 1 = pause briefly, then
-// replay the trial from its sample tone, same trial type. 0 = log the lick and
-// ignore it, which is how an animal that cannot yet withhold is trained up.
+// What a lick during the delay does. 1 = pause briefly, then resume the
+// remaining delay. 0 = log the lick and ignore it, which is how an animal that
+// cannot yet withhold is trained up. Sample licks are always logged and ignored.
 unsigned long T3_EARLY_LICK_PUNISH = 0;
-unsigned long T3_EARLY_LICK_PAUSE_MS = 100;  // quiet pause before replay, ms
+unsigned long T3_EARLY_LICK_PAUSE_MS = 300;  // quiet pause before delay resumes, ms
 
 // The random source task 3 draws its trial type from. Defined here so the task
 // layer itself stays free of hardware: tools/task_test.cpp defines its own
