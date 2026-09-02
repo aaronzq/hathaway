@@ -177,11 +177,11 @@ unsigned long T3_ANTI_BIAS_ACC_THRESH = 75;
 unsigned long T3_TEACH_PROB = 0;
 unsigned long T3_TEACH_INCLUDE_ABORT = 0;
 
-// What a lick during the delay does. 1 = pause briefly, then resume the
-// remaining delay. 0 = log the lick and ignore it, which is how an animal that
+// What a lick during the delay does. 1 = pause briefly, then replay the full
+// delay. 0 = log the lick and ignore it, which is how an animal that
 // cannot yet withhold is trained up. Sample licks are always logged and ignored.
 unsigned long T3_EARLY_LICK_PUNISH = 0;
-unsigned long T3_EARLY_LICK_PAUSE_MS = 300;  // quiet pause before delay resumes, ms
+unsigned long T3_EARLY_LICK_PAUSE_MS = 100;  // quiet pause before delay replays, ms
 
 // The random source task 3 draws its trial type from. Defined here so the task
 // layer itself stays free of hardware: tools/task_test.cpp defines its own

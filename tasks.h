@@ -149,7 +149,7 @@ private:
 //  and writing it down twice is how the two come to disagree.
 //
 //  EARLY LICKS. T3_EARLY_LICK_PUNISH decides what a lick during the delay
-//  means. Set, it pauses for T3_EARLY_LICK_PAUSE_MS, then resumes the remaining
+//  means. Set, it pauses for T3_EARLY_LICK_PAUSE_MS, then replays the full
 //  delay. Clear (the default), the lick is logged and otherwise ignored. Licks
 //  during the sample and the 100 ms go cue are always ignored.
 //
@@ -178,7 +178,7 @@ private:
 //      RESPONSE  --wrong-->       PUNISH  --T3_PUNISH_MS-->          ITI
 //      RESPONSE  --window shut, or left the port--> REWARD if rescued, else ITI
 //      DELAY     --lick, if T3_EARLY_LICK_PUNISH--> EARLY_PAUSE
-//      EARLY_PAUSE      --T3_EARLY_LICK_PAUSE_MS-->  DELAY (remaining time)
+//      EARLY_PAUSE      --T3_EARLY_LICK_PAUSE_MS-->  DELAY (full time)
 //      SAMPLEn | DELAY | GOCUE | EARLY_PAUSE --out of position--> REWARD if rescued, else ITI
 //      ITI       --T3_ITI_MS-->   IDLE
 // ===========================================================================
@@ -229,9 +229,6 @@ private:
   uint8_t lastType_   = 0;   // type of the previous trial (0 = none yet)
   uint8_t runLen_     = 0;   // how many trials in a row have been lastType_
   uint8_t pending_    = OUTCOME_ABORT;   // outcome to book when ITI is entered
-  uint32_t delaySegmentMs_ = 0;   // duration armed for this visit to DELAY
-  uint32_t delayLeft_      = 0;   // remaining delay after an early lick
-  bool     resumingDelay_  = false;
   AnsweredTrial hist_[ANTI_BIAS_CAP];
   uint8_t histHead_   = 0;   // next history slot to write
   uint8_t histCount_  = 0;   // answered trials currently stored

@@ -238,9 +238,6 @@ void DiscriminationTask::reset(uint32_t now) {
   lastType_   = 0;      // no history, so the first draw is never forced
   runLen_     = 0;
   pending_    = OUTCOME_ABORT;
-  delaySegmentMs_ = 0;
-  delayLeft_      = 0;
-  resumingDelay_  = false;
   clearT3AntiBiasHistory();
   drawProb1_  = 50;
   prob1Ready_ = false;
@@ -394,9 +391,6 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
 
     case T3_DELAY:
       if (licked && T3_EARLY_LICK_PUNISH) {
-        uint32_t elapsed = stateElapsed();
-        delayLeft_ = (elapsed >= delaySegmentMs_) ? 0 : delaySegmentMs_ - elapsed;
-        resumingDelay_ = true;
         return T3_EARLY_PAUSE;
       }
       if (in.has(EV_TIMEOUT)) return T3_GOCUE;
@@ -473,9 +467,7 @@ void DiscriminationTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) 
       setTimeout(trainMs());
       break;
     case T3_DELAY:
-      delaySegmentMs_ = resumingDelay_ ? delayLeft_ : T3_DELAY_MS;
-      resumingDelay_ = false;
-      setTimeout(delaySegmentMs_);
+      setTimeout(T3_DELAY_MS);
       break;
     case T3_GOCUE:
       out.push(ACT_TONE, T3_CUE_FREQ, T3_CUE_DUR);

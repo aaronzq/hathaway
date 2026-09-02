@@ -613,8 +613,8 @@ static void test_task3_teach_can_include_abort() {
   T3_TEACH_INCLUDE_ABORT = si;
 }
 
-static void test_task3_early_lick_pauses_delay_only() {
-  printf("task 3: T3_EARLY_LICK_PUNISH pauses only delay licks, then resumes delay\n");
+static void test_task3_early_lick_replays_delay() {
+  printf("task 3: T3_EARLY_LICK_PUNISH pauses only delay licks, then replays delay\n");
   setRand({0});                            // every draw is type 1
   Harness h(taskById(3));
   h.advance(1);                            // -> SAMPLE1
@@ -634,15 +634,53 @@ static void test_task3_early_lick_pauses_delay_only() {
   h.clearTrace();
 
   h.advance(T3_EARLY_LICK_PAUSE_MS);
-  check(h.trace() == "[DELAY]", "after the pause, the delay resumes");
+  check(h.trace() == "[DELAY]", "after the pause, the delay restarts");
   h.clearTrace();
 
-  h.advance(799);
-  check(h.trace() == "", "the go cue does not arrive before the remaining delay is served");
+  h.advance(T3_DELAY_MS - 1);
+  check(h.trace() == "", "the go cue does not arrive before a full replayed delay is served");
   h.advance(1);
   check(h.trace() == "[GOCUE]TONE(6000,100)",
-        "the go cue arrives after pause plus the original remaining delay");
+        "the go cue arrives after pause plus a fresh full delay");
   check(h.task()->trial() == 0, "the pause is not a trial outcome");
+}
+
+static void test_task3_aborted_delay_pause_does_not_shorten_next_delay() {
+  printf("task 3: aborting an early-lick pause does not shorten the next delay\n");
+  unsigned long se = T3_EARLY_LICK_PUNISH;
+  unsigned long st = T3_TEACH_PROB;
+  unsigned long si = T3_TEACH_INCLUDE_ABORT;
+  T3_EARLY_LICK_PUNISH = 1;
+  T3_TEACH_PROB = 0;
+  T3_TEACH_INCLUDE_ABORT = 0;
+  setRand({0, 0});                         // type 1, then type 1 again
+
+  Harness h(taskById(3));
+  h.advance(1);                            // -> SAMPLE1
+  h.advance(trainMs());                    // -> DELAY
+  h.advance(T3_DELAY_MS - 30);             // leave a distinctive 30 ms remainder
+  h.clearTrace();
+
+  h.cycle(EV_LICK1);                       // -> EARLY_PAUSE near the end of delay
+  check(h.trace() == "[EARLY_PAUSE]", "delay lick enters early pause");
+  h.clearTrace();
+
+  h.cycle(0, AWAY);                        // abort during the early-lick pause
+  check(h.trace() == "[ITI]", "leaving during early pause aborts the trial");
+  h.advance(T3_ITI_MS);                    // -> IDLE
+  h.clearTrace();
+
+  h.advance(1);                            // next trial -> SAMPLE1
+  h.advance(trainMs());                    // -> DELAY
+  h.clearTrace();
+  h.advance(T3_DELAY_MS - 1);
+  check(h.trace() == "", "next trial does not reuse the old 30 ms delay remainder");
+  h.advance(1);
+  check(h.trace() == "[GOCUE]TONE(6000,100)", "next trial gets the full delay");
+
+  T3_EARLY_LICK_PUNISH = se;
+  T3_TEACH_PROB = st;
+  T3_TEACH_INCLUDE_ABORT = si;
 }
 
 static void test_task3_early_lick_tolerated() {
@@ -1249,7 +1287,8 @@ int main() {
   test_task3_abort_wins_over_a_simultaneous_lick();
   test_task3_teach_excludes_abort_by_default();
   test_task3_teach_can_include_abort();
-  test_task3_early_lick_pauses_delay_only();
+  test_task3_early_lick_replays_delay();
+  test_task3_aborted_delay_pause_does_not_shorten_next_delay();
   test_task3_early_lick_tolerated();
   test_task3_repeat_cap();
   test_task3_prob1_drives_the_split();
