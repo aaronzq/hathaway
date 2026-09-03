@@ -375,6 +375,9 @@ class BaseDB:
     def write(self, samples, events):
         raise NotImplementedError
 
+    def close_session(self, session_id):
+        pass
+
     def close(self):
         pass
 
@@ -431,12 +434,17 @@ class PostgresDB(BaseDB):
                     "type,channel,value) VALUES %s", events)
         self.conn.commit()
 
+    def close_session(self, session_id):
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE sessions SET ended_at=now() "
+                        "WHERE session_id=%s", (session_id,))
+        self.conn.commit()
+        if self.session_id == session_id:
+            self.session_id = None
+
     def close(self):
         if self.session_id is not None:
-            with self.conn.cursor() as cur:
-                cur.execute("UPDATE sessions SET ended_at=now() "
-                            "WHERE session_id=%s", (self.session_id,))
-            self.conn.commit()
+            self.close_session(self.session_id)
         self.conn.close()
 
 

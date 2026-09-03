@@ -124,6 +124,9 @@ class SerialLink:
     def stop(self):
         self._stop.set()
 
+    def join(self, timeout=None):
+        self._thread.join(timeout=timeout)
+
     def send(self, text):
         """Write a command line. Returns True if it went out."""
         with self._wlock:
@@ -222,10 +225,13 @@ class Controller:
     def close_port(self, port):
         """Stop and release a port entirely: its reader thread exits, so it is
         no longer read, logged, or retried in the background."""
-        link = self.link_by_port.pop(port, None)
+        link = self.link_by_port.get(port)
         if link is None:
             return False, f"{port} is not open"
         link.stop()
+        if hasattr(link, "join"):
+            link.join(timeout=1.0)
+        self.link_by_port.pop(port, None)
         rig_id = self.port_rig.pop(port, None)
         self.port_status.pop(port, None)
         self.port_rx.pop(port, None)
@@ -412,6 +418,16 @@ class Controller:
         samples, events = [], []
         last = time.monotonic()
 
+        def flush():
+            nonlocal samples, events, last
+            if samples or events:
+                try:
+                    self.db.write(samples, events)
+                except Exception as e:
+                    print("[db] write error:", e)
+                samples, events = [], []
+            last = time.monotonic()
+
         def collect(stamped):
             """Route stamped rows by the kind that travels with each one."""
             for (kind, row), epoch_us in stamped:
@@ -431,7 +447,10 @@ class Controller:
                     # Forget the session id. _session() inserts a fresh row the
                     # next time this rig sends anything, which is what makes the
                     # session number advance on remove-and-add.
-                    self.sessions.pop(rig_id, None)
+                    sid = self.sessions.pop(rig_id, None)
+                    flush()
+                    if sid is not None:
+                        self.db.close_session(sid)
                     continue
 
                 sid = self._session(rig_id)
@@ -452,13 +471,7 @@ class Controller:
                 pass
             if (len(samples) + len(events) >= 200
                     or (time.monotonic() - last) >= 0.5):
-                if samples or events:
-                    try:
-                        self.db.write(samples, events)
-                    except Exception as e:
-                        print("[db] write error:", e)
-                    samples, events = [], []
-                last = time.monotonic()
+                flush()
 
     # -- commands (called from the web thread) ---------------------------- #
     def send_set(self, rig_id, name, value):
