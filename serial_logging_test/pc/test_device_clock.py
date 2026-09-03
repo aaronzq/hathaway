@@ -323,7 +323,6 @@ def test_postgres():
     check(lo.year == dt.datetime.now().year, f"dev_ts sits on the wall clock ({lo})")
 
     # --- every dashboard query still parses and returns rows --------------
-    dash = json.loads((here / "grafana/provisioning/dashboards/hathaway.json").read_text())
     frm = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=10)).isoformat()
     to = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)).isoformat()
 
@@ -331,18 +330,21 @@ def test_postgres():
         sql = re.sub(r"\$__timeFilter\(\s*([A-Za-z_.]+)\s*\)",
                      lambda m: f"{m.group(1)} >= '{frm}'::timestamptz "
                                f"AND {m.group(1)} <= '{to}'::timestamptz", sql)
-        return sql.replace("$__timeFrom()", f"'{frm}'").replace("$__timeTo()", f"'{to}'")
+        sql = sql.replace("$__timeFrom()", f"'{frm}'").replace("$__timeTo()", f"'{to}'")
+        return sql.replace("$rig", "1").replace("$session", str(sid))
 
     bad = 0
-    for p in dash["panels"]:
-        for t in p["targets"]:
-            try:
-                cur.execute(expand(t["rawSql"]))
-                cur.fetchall()
-            except Exception as ex:
-                bad += 1
-                print(f"   panel {p['id']} [{t['refId']}] FAILED: "
-                      f"{str(ex).strip().splitlines()[0]}")
+    for name in ("hathaway.json", "hathaway_review.json"):
+        dash = json.loads((here / f"grafana/provisioning/dashboards/{name}").read_text())
+        for p in dash["panels"]:
+            for t in p["targets"]:
+                try:
+                    cur.execute(expand(t["rawSql"]))
+                    cur.fetchall()
+                except Exception as ex:
+                    bad += 1
+                    print(f"   {name} panel {p['id']} [{t['refId']}] FAILED: "
+                          f"{str(ex).strip().splitlines()[0]}")
     check(bad == 0, f"all dashboard queries run ({bad} failures)")
 
 

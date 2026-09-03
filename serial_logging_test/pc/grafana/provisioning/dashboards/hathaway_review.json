@@ -116,14 +116,14 @@
       {
         "name": "total_trials",
         "label": "Trials in selected session",
-        "description": "Trials in the selected session, used to label the outcome pie's title. Gated identically to that panel's query so the number and the slices cannot disagree.",
+        "description": "Trials in the selected session and selected time range, used to label the outcome pie's title. Gated identically to that panel's query so the number and the slices cannot disagree.",
         "type": "query",
         "datasource": {
           "type": "postgres",
           "uid": "hathaway_pg"
         },
-        "query": "SELECT count(*) FROM events_dev WHERE type = 'OUTCOME' AND session_id = $session",
-        "refresh": 1,
+        "query": "SELECT count(*) FROM events_dev WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(host_ts)",
+        "refresh": 2,
         "hide": 2,
         "multi": false,
         "includeAll": false,
@@ -276,7 +276,7 @@
       },
       "type": "timeseries",
       "title": "Lick, Reward & Outcome events",
-      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.",
+      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart. TEACH is an unanswered trial rescued with water at the correct spout.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -331,7 +331,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Outcome rows. All four sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort.\r\n--\r\n-- Kept as four separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "-- Outcome rows. All five sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach.\r\n--\r\n-- Kept as separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "F",
@@ -365,6 +365,17 @@
           "editorMode": "code",
           "rawQuery": true,
           "rawSql": "SELECT dev_ts AS time, 5 AS abort FROM events_dev WHERE type = 'OUTCOME' AND channel = 3 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "I",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS teach FROM events_dev WHERE type = 'OUTCOME' AND channel = 4 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -486,6 +497,21 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "teach"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "lick1",
               "scope": "series"
             },
@@ -544,6 +570,25 @@
                   "mode": "fixed",
                   "fixedColor": "#097b77"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "teach"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "TEACH"
               }
             ]
           }
@@ -705,7 +750,7 @@
       },
       "type": "gauge",
       "title": "Cumulative rewards (selected session)",
-      "description": "Water delivered per spout over the whole of the selected session. Unlike the live dashboard there is no 'start of today' bound -- a session that ran past midnight is counted end to end.",
+      "description": "Water delivered per spout in the selected session and selected time range.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -720,7 +765,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1,\n       count(*) FILTER (WHERE channel = 2) AS reward2\n  FROM events_dev\n WHERE type = 'REWARD' AND session_id = $session"
+          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1,\n       count(*) FILTER (WHERE channel = 2) AS reward2\n  FROM events_dev\n WHERE type = 'REWARD' AND session_id = $session AND $__timeFilter(host_ts)"
         }
       ],
       "fieldConfig": {
@@ -787,7 +832,7 @@
       },
       "type": "piechart",
       "title": "Trial outcomes  --  $total_trials trials in session $session",
-      "description": "How the selected session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort. Whole session, no day bound.",
+      "description": "How the selected session's trials ended inside the selected time range. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -802,7 +847,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\n       count(*) FILTER (WHERE channel = 3) AS \"abort\"\n  FROM events_dev\n WHERE type = 'OUTCOME' AND session_id = $session"
+          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\n       count(*) FILTER (WHERE channel = 4) AS \"teach\"\n  FROM events_dev\n WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(host_ts)"
         }
       ],
       "fieldConfig": {
@@ -896,6 +941,25 @@
                 "value": "ABORT"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "teach"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "purple"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "TEACH"
+              }
+            ]
           }
         ]
       },
@@ -939,7 +1003,7 @@
       },
       "type": "barchart",
       "title": "Trials per hour (selected session)",
-      "description": "Trials booked in each hour of the clock, for the selected session only. All 24 bins are always drawn -- generate_series supplies the hours and the LEFT JOIN zero-fills the empty ones. Ignores the time picker, like its counterpart on the live dashboard.",
+      "description": "Trials booked in each hour of the clock, for the selected session and selected time range. All 24 bins are always drawn -- generate_series supplies the hours and the LEFT JOIN zero-fills the empty ones.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -954,7 +1018,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- 24 hourly bins for the selected session, zero-filled.\n--\n-- No $__timeFilter: this panel always covers the whole session, whatever the\n-- picker says, so it keeps its shape while you zoom the traces above.\nWITH bins AS (\n  SELECT generate_series(0, 23) AS hr\n),\ntrials AS (\n  SELECT date_part('hour', e.host_ts AT TIME ZONE 'America/Los_Angeles')::int AS hr,\n         count(*) AS n\n    FROM events_dev e\n   WHERE e.type = 'OUTCOME' AND e.session_id = $session\n   GROUP BY 1\n)\nSELECT lpad(b.hr::text, 2, '0') || ':00' AS \"hour\",\n       COALESCE(t.n, 0)::bigint          AS \"trials\"\n  FROM bins b\n  LEFT JOIN trials t ON t.hr = b.hr\n ORDER BY b.hr"
+          "rawSql": "-- 24 hourly bins for the selected session and selected time range, zero-filled.\nWITH bins AS (\n  SELECT generate_series(0, 23) AS hr\n),\ntrials AS (\n  SELECT date_part('hour', e.host_ts AT TIME ZONE 'America/Los_Angeles')::int AS hr,\n         count(*) AS n\n    FROM events_dev e\n   WHERE e.type = 'OUTCOME' AND e.session_id = $session AND $__timeFilter(e.host_ts)\n   GROUP BY 1\n)\nSELECT lpad(b.hr::text, 2, '0') || ':00' AS \"hour\",\n       COALESCE(t.n, 0)::bigint          AS \"trials\"\n  FROM bins b\n  LEFT JOIN trials t ON t.hr = b.hr\n ORDER BY b.hr"
         }
       ],
       "fieldConfig": {
