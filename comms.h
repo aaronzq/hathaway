@@ -48,6 +48,18 @@ void dumpParams();
 // by the "DUMP"/"GET" command.
 void dumpSchema();
 
+// Register a function to run at the end of a "DUMP"/"GET", after dumpParams().
+//
+// dumpParams() can only report CMD_PARAM rows, because a parameter is a value
+// the engine holds. Some state the host wants on reconnect is not a parameter
+// at all -- rail position, for one: the rig owns it, no SET can write it, and it
+// changes only when a command moves the hardware. Without a hook, such a value
+// would only reach a host that happened to be listening when it last changed.
+//
+// The hook runs on the control core, inside service(), so it may read device
+// objects directly and should do nothing but emit(). Optional; unset by default.
+void setDumpHook(void (*fn)());
+
 // Telemetry records dropped because the queue was full (health metric).
 uint32_t dropped();
 

@@ -1,6 +1,7 @@
 #include "behavior_board.h"
 #include "behavior_task.h"
 #include "comms.h"        // telemetry + command facility (protocol.h, comms.cpp)
+#include "railHandler.h"  // stepper rail (FastAccelStepper)
 #include "tasks.h"        // the state machines (task.h, task.cpp, tasks.cpp)
 
 // ===========================================================================
@@ -32,6 +33,7 @@ Rewarder       rewarder1, rewarder2;
 HX711          scale;
 SwitchHandler  sw;
 Magneto        magnet;
+RailHandler    rail;
 
 // Task state.
 unsigned int rewardNum1, rewardNum2;
@@ -55,6 +57,41 @@ ActionQueue   g_actions;
 static bool     g_toneOn   = false;
 static bool     g_pulseOn  = false;
 static uint32_t g_toneFreq = 0;   // frequency to report on later pulse onsets
+
+
+// ===========================================================================
+//  RAIL STATE
+//
+//  The rail is open loop: the only record of where it is, is the count of
+//  pulses the firmware believes it has sent. That belief survives only if
+//  nothing ever disturbs a move in progress, so exactly one move may be in
+//  flight at a time and only RAIL_STOP may interrupt it.
+//
+//  Why a flag and not just the stepper's isRunning(): commanding a move while
+//  the rail is already moving does not fail. FastAccelStepper retargets,
+//  relative to the target of the move in flight, so two clicks on Move would
+//  travel the sum of both. g_railBusy refuses the second command, and unlike a
+//  hardware read it can say WHY, so the refusal gets logged.
+//
+//  isRunning() is what ENDS a move, because only the hardware knows when the
+//  last pulse went out -- especially after a stop, which finishes somewhere
+//  nobody predicted. Reading the position at that moment is also what makes it
+//  exact: on the ESP32 the library warns that getCurrentPosition() can be off
+//  by the steps of the command in progress, and that is over precisely when
+//  isRunning() goes false.
+// ===========================================================================
+
+static bool     g_railBusy     = false; // a move has been ordered and not finished
+static uint32_t g_railDeadline = 0;     // backstop: give up waiting at this time
+
+// How long a move of `pulses` should take, rounded up: the ramp is near-instant
+// at the configured acceleration, so travel time dominates. Never used to
+// decide a move HAS finished -- only how soon it possibly could have.
+static uint32_t railExpectedMs(int32_t pulses) {
+  if (pulses == INT32_MIN) return 0;    // -INT32_MIN would overflow; unreachable
+  if (pulses < 0) pulses = -pulses;
+  return (uint32_t)((1000.0f * (float)pulses) / (float)RAIL_DEFAULT_SPEED_HZ) + 50u;
+}
 
 
 // ===========================================================================
@@ -83,6 +120,23 @@ enum : uint8_t {
   TELEM_TASK,     // channel = task id,     value = task id
   TELEM_OUTCOME,  // channel = OUTCOME_* code (0-based), value = trial number
   TELEM_T3_PROB1, // channel 1, value = effective type-1 draw probability %
+  TELEM_RAIL_CMD, // channel = RAIL_CMD_* disposition, value = commanded mm
+  TELEM_RAIL_POS, // channel 1, value = rail position in mm
+};
+
+// Why a RAIL_CMD line was written. The disposition is on the wire so that
+// "was this move performed?" is a query on the channel, not an inference from
+// whether the position afterwards happens to differ.
+enum : uint8_t {
+  RAIL_CMD_ACCEPTED = 1,   // move started; a RAIL_POS follows when it ends
+  RAIL_CMD_REFUSED  = 2,   // rail was already moving; nothing happened
+  RAIL_CMD_SET_HOME = 3,   // position redefined as zero; nothing moved
+  RAIL_CMD_STOP     = 4,   // move cut short on request
+  RAIL_CMD_TIMEOUT  = 5,   // backstop fired: the move never reported finishing
+  // No stepper attached, or it would not take the ramp. Kept apart from
+  // REFUSED: one means "ask again in a moment", the other means the rail is
+  // not going to work until someone looks at the wiring.
+  RAIL_CMD_UNAVAILABLE = 6,
 };
 
 static const TelemSpec TELEM_TABLE[] = {
@@ -103,6 +157,13 @@ static const TelemSpec TELEM_TABLE[] = {
   { TELEM_OUTCOME,  "OUTCOME",  TELEM_EVENT  },
   // Task-3-only state sample: the probability fed into that trial's type draw.
   { TELEM_T3_PROB1, "T3_PROB1", TELEM_SAMPLE },
+  // Rail commands and rail position, both in millimetres. An EVENT for the
+  // instruction and a SAMPLE for the resulting place: the command is an instant
+  // with a disposition, the position is a level that holds until the next move.
+  // A pulse-denominated command is converted to mm before it is reported, so
+  // there is exactly one unit in the log whichever way the operator asked.
+  { TELEM_RAIL_CMD, "RAIL_CMD", TELEM_EVENT  },
+  { TELEM_RAIL_POS, "RAIL_POS", TELEM_SAMPLE },
 };
 static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 
@@ -132,6 +193,101 @@ static void applyT3AntiBiasAuto(float v)  {
   }
 }
 static void doTare(float)                 { scale.tare(); }   // blocks ~1 s
+
+// --- rail ------------------------------------------------------------------
+// All four run on the control core, from Comms::service(). movePulses() and
+// stopMove() are non-blocking: they hand work to the stepper's background
+// helper and return, so none of these holds up the loop.
+//
+// Three of them refuse outright while a move is in flight. That is the whole
+// point of g_railBusy -- see RAIL STATE above. Refusals are reported rather
+// than swallowed, because the engine's "#NAME ok" ack only means the line was
+// received, and a silent refusal would look exactly like a completed move to
+// anyone reading the log later.
+
+static void railReportPos() {
+  Comms::emit(TELEM_RAIL_POS, 1, rail.currentPositionMm(), millis());
+}
+
+// Order a move of `pulses`. `mm` is the same distance in millimetres, which is
+// what gets logged: the caller converts, so the two never disagree.
+static void railStartMove(int32_t pulses, float mm) {
+  uint32_t now      = millis();
+  uint32_t expected = railExpectedMs(pulses);
+  if (g_railBusy) {
+    Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_REFUSED, mm, now);
+    return;
+  }
+  // Claimed BEFORE the move is handed over, so a second command arriving in the
+  // same service() drain, or on the very next loop, finds the rail busy even
+  // though the hardware has not started stepping yet.
+  g_railBusy     = true;
+  g_railDeadline = now + 3u * expected + 500u;
+
+  if (!rail.movePulses(pulses)) {
+    g_railBusy = false;
+    // movePulses() refuses for two unrelated reasons: there is no stepper, or
+    // the stepper still reports itself running. The second is only reachable
+    // after the backstop released the interlock early, and it means "try
+    // again", not "check the wiring" -- so ask which it was rather than
+    // reporting both as the same fault.
+    Comms::emit(TELEM_RAIL_CMD,
+                rail.isRunning() ? RAIL_CMD_REFUSED : RAIL_CMD_UNAVAILABLE,
+                mm, now);
+    return;
+  }
+  Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_ACCEPTED, mm, now);
+}
+
+static void doRailMoveMm(float mm) {
+  railStartMove(RailHandler::mmToPulses(mm), mm);
+}
+
+static void doRailMovePulses(float pulses) {
+  int32_t p = (int32_t)pulses;         // whole number guaranteed by ACTION_I32
+  railStartMove(p, (float)p / RAIL_CALIBRATION_MM_TO_PULSE);
+}
+
+static void doRailSetHome(float) {
+  uint32_t now = millis();
+  // Refused, but it does not claim the flag: redefining zero is instantaneous,
+  // so there is nothing to wait for afterwards. Busy and "no stepper" are
+  // reported apart, because they are the two things an operator watching a rail
+  // that will not move most needs to tell apart.
+  if (g_railBusy) {
+    Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_REFUSED, 0.0f, now);
+    return;
+  }
+  if (!rail.setHome()) {
+    Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_UNAVAILABLE, 0.0f, now);
+    return;
+  }
+  Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_SET_HOME, 0.0f, now);
+  railReportPos();
+}
+
+static void doRailStop(float) {
+  uint32_t now = millis();
+  // Acted on unconditionally, whatever the firmware currently believes about
+  // the rail. An emergency control that consults internal state first is one
+  // that fails in exactly the case it exists for.
+  rail.stop();
+  Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_STOP, 0.0f, now);
+
+  // Then hand the reporting to serviceRail() rather than sampling the position
+  // here, and do so whether or not a move was thought to be in flight.
+  //
+  // stopMove() decelerates -- a few milliseconds at this acceleration -- so the
+  // counter read on this line would be a mid-ramp value, and for an open-loop
+  // rail whose only position record is this log, publishing a position the rail
+  // then travels past is a silent corruption rather than a rounding error.
+  // Re-arming makes serviceRail() wait for rest and report the true one.
+  //
+  // Claiming the flag even when it was already clear also covers the case where
+  // the backstop below released it while the hardware was in fact still moving.
+  g_railBusy     = true;
+  g_railDeadline = now + 500u;          // deceleration is milliseconds
+}
 
 static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(REWARD_DURATION1,  0,   1000,  applyRewardDuration1),
@@ -188,6 +344,20 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(T3_TEACH_INCLUDE_ABORT, 0, 1,   nullptr),
   
   ACTION(TARE, doTare),
+
+  // --- rail ----------------------------------------------------------------
+  // Actions, not parameters, and that distinction is the safety property: the
+  // rig stores no "distance to move", so there is nothing for a reconnect or a
+  // DUMP to replay. No command, no movement.
+  //
+  // The two limits are per-move deltas, not bounds on absolute travel. 2 mm is
+  // 6040 pulses at the current calibration, so the pulse form is a whisker
+  // tighter than the millimetre form; near the limit the two are not quite
+  // interchangeable.
+  ACTION_F32(RAIL_MOVE_MM,     -2,    2,    doRailMoveMm),
+  ACTION_I32(RAIL_MOVE_PULSES, -6000, 6000, doRailMovePulses),
+  ACTION(RAIL_SET_HOME, doRailSetHome),   // redefine here as zero; nothing moves
+  ACTION(RAIL_STOP,     doRailStop),      // the only command that may interrupt
 };
 static const size_t CMD_COUNT = sizeof(CMD_TABLE) / sizeof(CMD_TABLE[0]);
 
@@ -381,6 +551,69 @@ static void serviceTask(uint32_t now) {
 
 
 // ===========================================================================
+//  RAIL SERVICING
+//
+//  Ends a move and reports where the rail actually stopped. Every move and
+//  every stop is reported from here and nowhere else, so those two cases share
+//  one code path and the stopped case has no separate logic to get wrong.
+//
+//  The reported position comes from the stepper's pulse counter, which counts
+//  what was actually emitted. A move cut short therefore reports where the rail
+//  really is, not where it was asked to go, which is exactly what an open-loop
+//  position log needs.
+//
+//  The invariant this maintains: every command that could have changed where
+//  the rail is -- an accepted move, a set-home, a stop -- is followed by exactly
+//  one RAIL_POS, and a rejected command is followed by none. Two stops during
+//  one move are two real operator actions and are both recorded as RAIL_CMD
+//  lines, but there was only ever one resting position, so there is one
+//  RAIL_POS. So "where was the rail after command X" is answerable from the log
+//  alone, without differencing positions to guess whether X did anything.
+// ===========================================================================
+
+static void serviceRail(uint32_t now) {
+  if (!g_railBusy) return;
+
+  // Rail at rest: the queue is empty and the ramp is idle, which is exactly the
+  // condition under which the pulse counter is exact rather than short by the
+  // command in flight. So this is the only moment worth reading it.
+  if (!rail.isRunning()) {
+    g_railBusy = false;
+    railReportPos();
+    return;
+  }
+
+  // Backstop. A move that never reports finishing would otherwise latch the
+  // rail busy until the next reboot, leaving it unusable and mute. Better to
+  // release the interlock and record that it had to be forced: failing open
+  // with a log line beats failing closed in silence. Signed compare, so this
+  // still works across the millis() wrap.
+  //
+  // The position published here may be mid-move, since by definition the
+  // hardware never said it had stopped -- which is what RAIL_CMD_TIMEOUT
+  // exists to warn a reader about. The interlock is not the only thing
+  // standing between this and a corrupted count: RailHandler::movePulses()
+  // refuses while the stepper reports itself running, so a move ordered after
+  // a spurious timeout is still rejected rather than stacked. And a RAIL_STOP
+  // re-arms this function, which is how the true resting position gets logged
+  // after a timeout that fired early.
+  if ((int32_t)(now - g_railDeadline) >= 0) {
+    g_railBusy = false;
+    Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_TIMEOUT, 0.0f, now);
+    railReportPos();
+  }
+}
+
+// Rig state that a DUMP should refresh but dumpParams() cannot reach, because
+// it is not a parameter. Rail position qualifies twice over: no SET can write
+// it, and since the rail reports only when it moves, a panel that connected
+// after the last move would otherwise have nothing at all to show.
+static void dumpExtraState() {
+  railReportPos();
+}
+
+
+// ===========================================================================
 //  SETUP / LOOP
 // ===========================================================================
 
@@ -394,6 +627,11 @@ void setup() {
   sw        = SwitchHandler(SWITCH_PIN);
   magnet    = Magneto(MAGNET_PIN, MAG_FIX_DURATION);
   magnet.setGraceDuration(MAG_GRACE_MS);
+
+  // A failure here needs no separate report: with no stepper attached every
+  // rail command answers RAIL_CMD_UNAVAILABLE, which says exactly this and says
+  // it at the moment someone tries to use the rail.
+  rail.begin(RAIL_STEP_PIN, RAIL_DIR_PIN);
 
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
   scale.set_scale();
@@ -409,6 +647,7 @@ void setup() {
   grating.switchOn(false);
 
   Comms::begin(RIG_ID, TELEM_TABLE, TELEM_COUNT, CMD_TABLE, CMD_COUNT);
+  Comms::setDumpHook(dumpExtraState);
 
   rewardNum1 = 0;
   rewardNum2 = 0;
@@ -417,6 +656,10 @@ void setup() {
   // both the schema and the settings from the start of the session.
   Comms::dumpSchema();
   Comms::dumpParams();
+  // Startup does not go through the DUMP command, so the hook has to be called
+  // by hand here. Both paths matter: this one publishes the position a reboot
+  // has just reset to zero, the hook covers a host connecting later.
+  dumpExtraState();
 
   // Start whichever task TASK names. g_activeTask is 0, so this always fires.
   serviceTask(millis());
@@ -425,6 +668,7 @@ void setup() {
 void loop() {
   Comms::service();          // apply any parameter changes the host sent
 
+  serviceRail(millis());     // close out a finished rail move and report it
   serviceTask(millis());     // honour a pending "SET TASK n", if it is safe to
 
   Inputs in = sense();       // 1. SENSE

@@ -17,4 +17,7 @@
 
 #define MAGNET_PIN 12
 
+#define RAIL_STEP_PIN 17
+#define RAIL_DIR_PIN 18
+
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -85,7 +86,28 @@ enum : uint8_t {
 enum CmdKind : uint8_t {
   CMD_PARAM,    // "SET <NAME> <VALUE>" -- writes a tunable global
   CMD_ACTION,   // "<NAME>"             -- runs a one-shot handler
+  // "<NAME> <VALUE>" -- a one-shot handler that takes one argument, range
+  // checked like a parameter but stored nowhere. For a command that DOES
+  // something with a number rather than remembering one: a rail move is an
+  // instruction to travel 0.4 mm now, not a "distance" the rig holds. Because
+  // nothing is stored, such a command never appears in a DUMP and so can never
+  // be replayed by a reconnect -- no action, no effect.
+  //
+  // _F32 takes any value in range; _I32 additionally requires a whole number,
+  // so a step count is never silently rounded.
+  CMD_ACTION_F32,
+  CMD_ACTION_I32,
 };
+
+// True for every kind that runs a handler rather than writing a global.
+inline bool protoIsAction(uint8_t kind) {
+  return kind == CMD_ACTION || kind == CMD_ACTION_F32 || kind == CMD_ACTION_I32;
+}
+
+// True for the kinds that expect a value token after the name.
+inline bool protoActionTakesValue(uint8_t kind) {
+  return kind == CMD_ACTION_F32 || kind == CMD_ACTION_I32;
+}
 
 enum StoreType : uint8_t {
   STORE_NONE,
@@ -112,6 +134,8 @@ struct CmdSpec {
 //   PARAM_U32(REWARD_DURATION1, 0, 1000, applyRewardDuration1)
 //   PARAM_F32(SCALE_HIGH_THRESH, -50, 50, nullptr)
 //   ACTION(TARE, doTare)
+//   ACTION_F32(RAIL_MOVE_MM, -2, 2, doRailMoveMm)
+//   ACTION_I32(RAIL_MOVE_PULSES, -6000, 6000, doRailMovePulses)
 //
 #define PARAM_U32(VAR, LO, HI, FN)                                            \
   { #VAR, CMD_PARAM, STORE_U32, (void *)&VAR, (float)(LO), (float)(HI), FN, true }
@@ -121,6 +145,10 @@ struct CmdSpec {
   { #NAME, CMD_ACTION, STORE_NONE, nullptr, 0.0f, 0.0f, FN, true }
 #define ACTION_QUIET(NAME, FN)                                                \
   { #NAME, CMD_ACTION, STORE_NONE, nullptr, 0.0f, 0.0f, FN, false }
+#define ACTION_F32(NAME, LO, HI, FN)                                          \
+  { #NAME, CMD_ACTION_F32, STORE_NONE, nullptr, (float)(LO), (float)(HI), FN, true }
+#define ACTION_I32(NAME, LO, HI, FN)                                          \
+  { #NAME, CMD_ACTION_I32, STORE_NONE, nullptr, (float)(LO), (float)(HI), FN, true }
 
 // Sent from the comms core to the control core once a line has been validated.
 struct CmdMsg {
@@ -213,11 +241,27 @@ inline void protoFirstToken(const char *s, char *out, size_t cap) {
   out[n] = '\0';
 }
 
+// Step over the first token and any blanks after it. Returns a pointer to
+// whatever follows -- "" if the line held only that one token.
+inline const char *protoAfterFirstToken(const char *s) {
+  while (*s == ' ' || *s == '\t') s++;
+  while (*s && *s != ' ' && *s != '\t') s++;
+  while (*s == ' ' || *s == '\t') s++;
+  return s;
+}
+
 // Parse one inbound line into a CmdMsg. Pure function: no Serial, no RTOS, no
 // globals -- host-testable. Accepts:
-//     "DUMP" / "GET"        -> CMD_SLOT_DUMP
-//     "<ACTION>"            -> that action's slot
-//     "SET <NAME> <VALUE>"  -> that parameter's slot, range-checked
+//     "DUMP" / "GET"          -> CMD_SLOT_DUMP
+//     "<ACTION>"              -> that action's slot
+//     "<ACTION> <VALUE>"      -> that action's slot, range-checked
+//     "SET <NAME> <VALUE>"    -> that parameter's slot, range-checked
+//
+// Anything else is rejected, including the near-misses: an action given a value
+// it does not take, an action denied the value it does take, a whole-number
+// action handed a fraction, and a valued action smuggled in through SET. The
+// strictness is deliberate. These commands move hardware, and a line that is
+// silently reinterpreted rather than refused is how a typo becomes a movement.
 inline ParseResult protoParseCommand(const CmdSpec *ct, size_t ctN,
                                      const char *s, CmdMsg *out,
                                      char *err, size_t errcap) {
@@ -230,15 +274,50 @@ inline ParseResult protoParseCommand(const CmdSpec *ct, size_t ctN,
   }
 
   int slot = protoFindCmd(ct, ctN, tok);
-  if (slot >= 0 && ct[slot].kind == CMD_ACTION) {
-    out->slot = (uint8_t)slot; out->value = 0.0f;
+  if (slot >= 0 && protoIsAction(ct[slot].kind)) {
+    const char *rest = protoAfterFirstToken(s);
+
+    if (!protoActionTakesValue(ct[slot].kind)) {
+      if (*rest != '\0') {           // "TARE 5" is a mistake, not a tare
+        snprintf(err, errcap, "#ERR parse: %s", s);
+        return PARSE_ERR;
+      }
+      out->slot = (uint8_t)slot; out->value = 0.0f;
+      return PARSE_OK;
+    }
+
+    // One number and nothing else: sscanf returning 1 means it read the value
+    // and found no trailing token, so "RAIL_MOVE_MM 1 2" and "RAIL_MOVE_MM abc"
+    // are both refused rather than half-read.
+    double val;
+    char   extra[4];
+    if (sscanf(rest, "%lf %3s", &val, extra) != 1 || isnan(val)) {
+      // NaN is checked here and not left to the range test below, because every
+      // comparison against NaN is false: "nan" would pass a range check, then
+      // be cast to an integer (undefined), and reach the hardware as a step
+      // count nobody chose. sscanf accepts the spelling, so it is reachable
+      // from the wire. Infinities need no special case -- they fail the range.
+      snprintf(err, errcap, "#ERR parse: %s", s);
+      return PARSE_ERR;
+    }
+    // Range before the whole-number test, so a wild value is reported as out of
+    // range and never reaches the integer cast below.
+    if (val < ct[slot].lo || val > ct[slot].hi) {
+      snprintf(err, errcap, "#ERR range: %s=%g", ct[slot].name, val);
+      return PARSE_ERR;
+    }
+    if (ct[slot].kind == CMD_ACTION_I32 && val != (double)(long)val) {
+      snprintf(err, errcap, "#ERR parse: %s", s);   // no silent rounding
+      return PARSE_ERR;
+    }
+    out->slot = (uint8_t)slot; out->value = (float)val;
     return PARSE_OK;
   }
 
   char   name[32];
   double val;
-  if (sscanf(s, "SET %31s %lf", name, &val) != 2) {
-    snprintf(err, errcap, "#ERR parse: %s", s);
+  if (sscanf(s, "SET %31s %lf", name, &val) != 2 || isnan(val)) {
+    snprintf(err, errcap, "#ERR parse: %s", s);   // NaN: see the note above
     return PARSE_ERR;
   }
   slot = protoFindCmd(ct, ctN, name);

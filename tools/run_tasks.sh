@@ -13,3 +13,8 @@ g++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -I. -Ishim \
     -o task_test task_test.cpp ../task.cpp ../tasks.cpp
 
 ./task_test
+
+g++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -I. -Ishim \
+    -o protocol_test protocol_test.cpp
+
+./protocol_test

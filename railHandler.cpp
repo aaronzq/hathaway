@@ -15,7 +15,20 @@ bool RailHandler::begin(uint8_t stepPin, uint8_t dirPin,
                         bool dirHighCountsUp, uint32_t speedHz)
 {
     if (!railEngineReady) {
-        railEngine.init();
+        // Pinned to core 1, with the rest of the rig, rather than left to float.
+        //
+        // Step pulses come out of hardware, not from the CPU toggling a pin.
+        // The engine task only refills the peripheral's queue: it wakes every
+        // 4 ms and plans 20 ms ahead (FastAccelStepper defaults), so the cost is
+        // some 250 short wakes a second -- less than the HX711 read this loop
+        // already does every cycle.
+        //
+        // The argument is NOT optional in effect: FastAccelStepper's default is
+        // 255, which means xTaskCreate() and no affinity at all, so the task
+        // would be free to land on core 0 and share it with the comms task and
+        // Serial. Only 0 and 1 use xTaskCreatePinnedToCore(). Checked against
+        // FastAccelStepperEngine.h in 1.2.7.
+        railEngine.init(1);
         railEngineReady = true;
     }
 
@@ -76,6 +89,11 @@ bool RailHandler::isRunning()
 
 bool RailHandler::setHome()
 {
+    // The isRunning() guard is not just tidiness. On the ESP32,
+    // setCurrentPosition() is implemented on top of getCurrentPosition(), which
+    // does not account for the steps of the command already in flight, so the
+    // library explicitly recommends calling it only at standstill. Rezeroing
+    // mid-move would therefore put the origin at a position the rail is not at.
     if (stepper == nullptr || stepper->isRunning()) {
         return false;
     }
@@ -102,7 +120,7 @@ void RailHandler::updateCurrentPosition()
     }
 }
 
-int32_t RailHandler::mmToPulses(float mm) const
+int32_t RailHandler::mmToPulses(float mm)
 {
     float pulses = mm * RAIL_CALIBRATION_MM_TO_PULSE;
     if (pulses >= 0.0f) {

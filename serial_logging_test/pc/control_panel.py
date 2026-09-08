@@ -75,6 +75,13 @@ class RigState:
         self.weight_buf = deque(maxlen=WEIGHT_AVG_N)  # raw weights for the moving avg
         self.active_task = None               # TASK telemetry: the task actually running
         self.t3_prob1 = None                  # latest effective task-3 type-1 probability
+        # Rail position in mm. Unlike weight this is not a stream: the rig
+        # reports it only when a command moves the rail, at boot, and in reply
+        # to a DUMP. So it is displayed as-is with no averaging, and it is
+        # cleared whenever the rig may have restarted -- a board that has just
+        # rebooted is back at zero, and showing the pre-reboot value would be
+        # worse than showing nothing.
+        self.rail_mm = None
         self.counts = defaultdict(int)        # e.g. "LICK1", "REWARD2"
         self.dropped = 0
         self.last_seen = None                 # epoch seconds
@@ -95,6 +102,7 @@ class RigState:
             "weight": self.weight_avg(),      # moving average (display only)
             "active_task": self.active_task,
             "t3_prob1": self.t3_prob1,
+            "rail_mm": self.rail_mm,
             "counts": dict(self.counts),
             "dropped": self.dropped,
             "last_seen": self.last_seen,
@@ -331,6 +339,13 @@ class Controller:
                 # coming" marker on the wire -- there is no explicit delimiter.
                 if st.param_dump is None:
                     st.param_dump = {}
+                    # Same marker, same reasoning, for the rail: whatever
+                    # follows is a fresh statement of the rig's state, and if
+                    # this burst is a reboot rather than our own DUMP then the
+                    # position we are holding is from before the reset. Both
+                    # cases send a RAIL_POS right behind the burst, so the
+                    # display blanks for one poll at most.
+                    st.rail_mm = None
                 # setup() dumps the schema, so this may be a restart -- but our
                 # own DUMP looks identical, so only arm the detector. See
                 # DeviceClock.arm_boot(). Sent through the queue rather than
@@ -391,6 +406,8 @@ class Controller:
                     st.t3_prob1 = None
             if r["type"] == "T3_PROB1":
                 st.t3_prob1 = r["value"]
+            if r["type"] == "RAIL_POS":
+                st.rail_mm = r["value"]
             if r["kind"] == "E":
                 ch = r["channel"] or ""
                 st.counts[f'{r["type"]}{ch}'] += 1
@@ -500,6 +517,39 @@ class Controller:
             return False, f"rig {rig_id} port not open"
         return True, f"sent TARE to rig {rig_id} (scale zeroing)"
 
+    # -- rail ------------------------------------------------------------- #
+    # Same shape as send_tare: hand the line over and let the rig judge it. The
+    # firmware range-checks the distance, refuses a second move while one is in
+    # flight, and reports the disposition on RAIL_CMD, so there is nothing
+    # useful for the panel to decide here.
+    def _send_action(self, rig_id, line, what):
+        link = self.link_by_rig.get(rig_id)
+        if link is None:
+            return False, f"rig {rig_id} not seen yet"
+        if not link.send(line):
+            return False, f"rig {rig_id} port not open"
+        return True, f"sent {what} to rig {rig_id} (rig will confirm or reject)"
+
+    def send_rail_move(self, rig_id, unit, value):
+        if unit == "pulses":
+            # ACTION_I32 rejects a fraction outright rather than rounding it,
+            # so send a whole number or nothing.
+            if float(value) != int(float(value)):
+                return False, "pulses must be a whole number"
+            line = f"RAIL_MOVE_PULSES {int(float(value))}"
+        elif unit == "mm":
+            line = f"RAIL_MOVE_MM {_fmt_value(value)}"
+        else:
+            return False, f"unknown rail unit: {unit}"
+        return self._send_action(rig_id, line, line)
+
+    def send_rail_set_home(self, rig_id):
+        return self._send_action(rig_id, "RAIL_SET_HOME",
+                                 "RAIL_SET_HOME (redefines zero; nothing moves)")
+
+    def send_rail_stop(self, rig_id):
+        return self._send_action(rig_id, "RAIL_STOP", "RAIL_STOP")
+
     def snapshot(self):
         with self.lock:
             rigs = {str(rid): st.snapshot() for rid, st in self.rigs.items()}
@@ -537,6 +587,10 @@ def make_app():
     class OpenBody(BaseModel):
         port: str
 
+    class RailMoveBody(BaseModel):
+        unit: str      # "mm" or "pulses"
+        value: float
+
     @app.get("/", response_class=HTMLResponse)
     def index():
         return HTML_PAGE
@@ -568,6 +622,21 @@ def make_app():
     @app.post("/api/rig/{rig_id}/tare")
     def tare(rig_id: int):
         ok, msg = CTRL.send_tare(rig_id)
+        return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
+
+    @app.post("/api/rig/{rig_id}/rail/move")
+    def rail_move(rig_id: int, body: RailMoveBody):
+        ok, msg = CTRL.send_rail_move(rig_id, body.unit, body.value)
+        return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
+
+    @app.post("/api/rig/{rig_id}/rail/sethome")
+    def rail_set_home(rig_id: int):
+        ok, msg = CTRL.send_rail_set_home(rig_id)
+        return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
+
+    @app.post("/api/rig/{rig_id}/rail/stop")
+    def rail_stop(rig_id: int):
+        ok, msg = CTRL.send_rail_stop(rig_id)
         return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
 
     @app.on_event("shutdown")
@@ -631,6 +700,23 @@ HTML_PAGE = """<!doctype html>
  .hero .w{font-size:clamp(24px,3vw,40px);font-weight:600;color:#e8eef4;line-height:1.15;margin-top:4px}
  .hero .w.small{font-size:clamp(20px,2.2vw,30px);margin-top:14px}
  .hero .wl{font-size:12px;color:#8b93a2;margin-top:2px}
+ .hero hr{border:0;border-top:1px solid rgba(140,160,180,.12);margin:12px 0}
+ .hero .btnrow{display:flex;gap:6px}
+ .hero .btnrow button{flex:1}
+ /* mm / pulses segmented toggle: one control, two halves, no dropdown */
+ .seg{display:flex;border:1px solid rgba(109,207,142,.45);border-radius:999px;
+      overflow:hidden;margin:8px 0 6px}
+ .seg span{flex:1;padding:4px 0;cursor:pointer;color:#6dcf8e;
+      background:rgba(109,207,142,.06);font-size:12px;user-select:none}
+ .seg span.on{background:rgba(109,207,142,.30);color:#d6ffe6}
+ /* the value input, with the live unit sitting inside it */
+ .unitbox{display:flex;align-items:center;gap:4px;border:1px solid rgba(140,160,180,.25);
+      border-radius:4px;background:#0b111b;padding:0 6px;margin-bottom:6px}
+ .unitbox input{border:0;background:transparent;flex:1;width:auto;text-align:right}
+ .unitbox .u{font-size:11px;color:#8b93a2;font-family:ui-monospace,monospace}
+ button.stop{background:rgba(229,103,95,.12);color:#e5675f;
+      border-color:rgba(229,103,95,.45)}
+ button.stop:hover{background:rgba(229,103,95,.22);color:#ff8f87}
  #ctllog{flex:1;min-height:60px;overflow:auto;font-family:ui-monospace,monospace;font-size:11px;
       color:#8fa0ac;white-space:pre-wrap;background:#0b111b;border:1px solid rgba(140,160,180,.12);
       border-radius:4px;padding:8px;margin-top:12px}
@@ -697,11 +783,28 @@ HTML_PAGE = """<!doctype html>
         <div class="rig" id="heroRig">&mdash;</div>
         <div class="w" id="ctlweight">&mdash;</div>
         <div class="wl">weight</div>
+        <div style="margin-top:8px"><button id="tarebtn">Tare</button></div>
+        <hr>
+        <div class="w small" style="margin-top:0" id="ctlrail">&mdash;</div>
+        <div class="wl">rail</div>
+        <div class="seg" id="railunit">
+          <span data-unit="mm" class="on">mm</span><span data-unit="pulses">pulses</span>
+        </div>
+        <div class="unitbox">
+          <input id="railval" placeholder="&plusmn;2"><span class="u" id="railu">mm</span>
+        </div>
+        <div class="btnrow">
+          <button id="railmovebtn">Move</button>
+          <button id="railstopbtn" class="stop">Stop</button>
+        </div>
+        <div class="btnrow" style="margin-top:6px">
+          <button id="railhomebtn">Set Home</button>
+        </div>
         <div id="t3probBox" style="display:none">
-          <div class="w small" id="ctlt3prob">&mdash;</div>
+          <hr>
+          <div class="w small" style="margin-top:0" id="ctlt3prob">&mdash;</div>
           <div class="wl">T3 prob1</div>
         </div>
-        <div style="margin-top:10px"><button id="tarebtn">Tare</button></div>
       </div>
     </div>
     <div id="ctllog"></div>
@@ -720,6 +823,31 @@ function addPort(){const p=document.getElementById('addsel').value;
 function closePort(p){post('/api/close',{port:p});}
 function fetchRig(rig){post('/api/rig/'+rig+'/dump');}
 function tareRig(rig){post('/api/rig/'+rig+'/tare');}
+
+// ---- Rail ----
+// The toggle picks which command Move sends and nothing else. Position is
+// always displayed in mm, whichever way a move was asked for, because that is
+// the only unit the rig reports.
+let railUnit='mm';
+function railSetUnit(u){
+  railUnit=u;
+  const seg=document.getElementById('railunit');
+  seg.querySelectorAll('span').forEach(function(s){
+    s.classList.toggle('on',s.getAttribute('data-unit')===u);});
+  document.getElementById('railu').textContent=u;
+  document.getElementById('railval').placeholder=(u==='mm')?'\\u00b12':'\\u00b16000';
+}
+// The value is deliberately left in the box after a move: nudging by the same
+// small delta several times is the normal way this control gets used. Clicking
+// twice in quick succession is safe -- the rig refuses a second move while one
+// is still running and records the refusal.
+function railMove(rig){
+  const v=parseFloat(document.getElementById('railval').value);
+  if(isNaN(v)){flash(false,'enter a distance first');return;}
+  post('/api/rig/'+rig+'/rail/move',{unit:railUnit,value:v});
+}
+function railSetHome(rig){post('/api/rig/'+rig+'/rail/sethome');}
+function railStop(rig){post('/api/rig/'+rig+'/rail/stop');}
 async function send(rig,name,inp){const v=parseFloat(inp.value);
   if(isNaN(v)){flash(false,'enter a number first');return;}
   const j=await post('/api/rig/'+rig+'/set',{name:name,value:v});if(j.ok)inp.value='';}
@@ -794,9 +922,11 @@ function renderControl(state){
   document.getElementById('ctlnone').style.display=has?'none':'block';
   const hero=document.getElementById('heroRig'), w=document.getElementById('ctlweight'),
         pbox=document.getElementById('t3probBox'), prob=document.getElementById('ctlt3prob'),
+        railv=document.getElementById('ctlrail'),
         cp=document.getElementById('ctlport'), lg=document.getElementById('ctllog');
   if(!has){cp.innerHTML='&mdash;';hero.innerHTML='&mdash;';w.innerHTML='&mdash;';
-    prob.innerHTML='&mdash;';pbox.style.display='none';lg.textContent='';return;}
+    prob.innerHTML='&mdash;';pbox.style.display='none';railv.innerHTML='&mdash;';
+    lg.textContent='';return;}
   const rig=Number(selectedRig);
   cp.textContent=rigPort[rig];
   hero.textContent='RIG '+rig;
@@ -806,6 +936,9 @@ function renderControl(state){
     ctlRows={};ctlRigForRows=rig;}
   const r=state.rigs[rig]||{};
   w.textContent=(r.weight!=null)?(r.weight+' g'):'\\u2014';
+  // Fixed 3 decimals rather than the raw wire value: one pulse is 0.00033 mm,
+  // so "%g" from the firmware can arrive as 0.000331126 or in exponent form.
+  railv.textContent=(r.rail_mm!=null)?(r.rail_mm.toFixed(3)+' mm'):'\\u2014';
   const params=r.params||{};
   const paramTask=Number(params['TASK']);
   const activeTask=(r.active_task!=null)?Number(r.active_task):paramTask;
@@ -840,6 +973,12 @@ document.getElementById('rigsel').onchange=function(){selectedRig=this.value;
   if(lastState)renderControl(lastState);};
 document.getElementById('tarebtn').onclick=function(){if(selectedRig)tareRig(Number(selectedRig));};
 document.getElementById('fetchbtn').onclick=function(){if(selectedRig)fetchRig(Number(selectedRig));};
+document.getElementById('railunit').querySelectorAll('span').forEach(function(s){
+  s.onclick=function(){railSetUnit(s.getAttribute('data-unit'));};});
+document.getElementById('railmovebtn').onclick=function(){if(selectedRig)railMove(Number(selectedRig));};
+document.getElementById('railstopbtn').onclick=function(){if(selectedRig)railStop(Number(selectedRig));};
+document.getElementById('railhomebtn').onclick=function(){if(selectedRig)railSetHome(Number(selectedRig));};
+railSetUnit('mm');
 async function tick(){try{const r=await fetch('/api/state');update(await r.json());}catch(e){}}
 setInterval(tick,1000);tick();
 </script></body></html>"""

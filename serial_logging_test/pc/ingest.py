@@ -102,6 +102,8 @@ KNOWN_KINDS = {
     "T3_PROB1": "S",  # effective type-1 draw probability used by task 3
     "STATE": "E",     # state entered; channel = state index
     "OUTCOME": "E",   # trial ended; channel = OUTCOME_* code
+    "RAIL_POS": "S",  # rail position in mm; holds until the next move
+    "RAIL_CMD": "E",  # rail command; channel = disposition, value = mm asked for
 }
 
 # Learned from "#DEF" lines at runtime; takes precedence over KNOWN_KINDS.

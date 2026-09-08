@@ -24,10 +24,15 @@ public:
     float currentPositionMm();
     int32_t currentPositionPulses();
 
+    // Public and static because the sketch converts too: a move commanded in
+    // pulses is logged in millimetres, and one commanded in millimetres is
+    // handed to the stepper in pulses. One definition of the calibration, so
+    // the command that runs and the number that gets logged cannot disagree.
+    static int32_t mmToPulses(float mm);
+
 private:
     FastAccelStepper *stepper;
     int32_t currentPositionPulses_;
 
     void updateCurrentPosition();
-    int32_t mmToPulses(float mm) const;
 };

@@ -31,6 +31,10 @@ QueueHandle_t     g_cmdQueue   = nullptr;   // comms core  -> control core
 TaskHandle_t      g_commsTask  = nullptr;
 volatile uint32_t g_dropped    = 0;
 
+// Optional sketch-supplied emitter for state a DUMP cannot otherwise reach.
+// See setDumpHook() in comms.h.
+void (*g_dumpHook)() = nullptr;
+
 // --- comms core: inbound ---------------------------------------------------
 
 // Validate one inbound line (protoParseCommand does the pure work) and hand it
@@ -122,10 +126,17 @@ void dumpSchema() {
     emit(TELEM_INTERNAL_DEF, (uint8_t)i, 0.0f, now);
 }
 
+void setDumpHook(void (*fn)()) { g_dumpHook = fn; }
+
 void service() {
   CmdMsg m;
   while (g_cmdQueue && xQueueReceive(g_cmdQueue, &m, 0) == pdTRUE) {
-    if (m.slot == CMD_SLOT_DUMP) { dumpSchema(); dumpParams(); continue; }
+    if (m.slot == CMD_SLOT_DUMP) {
+      dumpSchema();
+      dumpParams();
+      if (g_dumpHook) g_dumpHook();   // non-parameter state, e.g. rail position
+      continue;
+    }
     if (m.slot >= g_ctN) continue;
     const CmdSpec &c = g_ct[m.slot];
 
