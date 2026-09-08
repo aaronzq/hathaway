@@ -6,3 +6,4 @@ __pycache__/
 # compressed and 825 MB as plain SQL -- and must never end up in a commit.
 *.dump
 backup*.sql
+AGENTS.md
