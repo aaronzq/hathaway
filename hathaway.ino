@@ -137,6 +137,11 @@ enum : uint8_t {
   // REFUSED: one means "ask again in a moment", the other means the rail is
   // not going to work until someone looks at the wiring.
   RAIL_CMD_UNAVAILABLE = 6,
+  // Accepted, but nobody asked for it: task 1's automatic retraction. A
+  // separate code rather than a flag elsewhere, so "did the rig move the rail
+  // or did the operator" is one WHERE clause and never an inference from
+  // timestamps.
+  RAIL_CMD_AUTO     = 7,
 };
 
 static const TelemSpec TELEM_TABLE[] = {
@@ -192,6 +197,17 @@ static void applyT3AntiBiasAuto(float v)  {
     if (t3 != nullptr) t3->clearT3AntiBiasHistory();
   }
 }
+// Turning the retraction off discards its reward history, so switching it back
+// on always starts from an empty window rather than acting on rewards earned at
+// a rail position, or under settings, that no longer apply. Same shape as
+// applyT3AntiBiasAuto above: clear on the write of zero, so no previous-value
+// bookkeeping is needed.
+static void applyT1RailAuto(float v) {
+  if ((unsigned long)v == 0) {
+    Task *t1 = taskById(1);
+    if (t1 != nullptr) t1->clearT1RailWindow();
+  }
+}
 static void doTare(float)                 { scale.tare(); }   // blocks ~1 s
 
 // --- rail ------------------------------------------------------------------
@@ -210,8 +226,11 @@ static void railReportPos() {
 }
 
 // Order a move of `pulses`. `mm` is the same distance in millimetres, which is
-// what gets logged: the caller converts, so the two never disagree.
-static void railStartMove(int32_t pulses, float mm) {
+// what gets logged: the caller converts, so the two never disagree. `okCode` is
+// the disposition to record on success -- ACCEPTED for an operator command, AUTO
+// for task 1's retraction. One entry point for both, so the interlock, the
+// backstop and the position report cannot drift apart between them.
+static void railStartMove(int32_t pulses, float mm, uint8_t okCode) {
   uint32_t now      = millis();
   uint32_t expected = railExpectedMs(pulses);
   if (g_railBusy) {
@@ -236,16 +255,16 @@ static void railStartMove(int32_t pulses, float mm) {
                 mm, now);
     return;
   }
-  Comms::emit(TELEM_RAIL_CMD, RAIL_CMD_ACCEPTED, mm, now);
+  Comms::emit(TELEM_RAIL_CMD, okCode, mm, now);
 }
 
 static void doRailMoveMm(float mm) {
-  railStartMove(RailHandler::mmToPulses(mm), mm);
+  railStartMove(RailHandler::mmToPulses(mm), mm, RAIL_CMD_ACCEPTED);
 }
 
 static void doRailMovePulses(float pulses) {
   int32_t p = (int32_t)pulses;         // whole number guaranteed by ACTION_I32
-  railStartMove(p, (float)p / RAIL_CALIBRATION_MM_TO_PULSE);
+  railStartMove(p, (float)p / RAIL_CALIBRATION_MM_TO_PULSE, RAIL_CMD_ACCEPTED);
 }
 
 static void doRailSetHome(float) {
@@ -306,6 +325,13 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(TASK,              1,   3,     nullptr),
   PARAM_U32(T1_SPOUT1_ENABLE,  0,   1,     nullptr),
   PARAM_U32(T1_SPOUT2_ENABLE,  0,   1,     nullptr),
+  // Automatic rail retraction. See behavior_task.h for what it does and the two
+  // things to know before switching it on. The window maximum must not exceed
+  // LickRewardTask::RAIL_WIN_CAP, which sizes the buffer holding it.
+  PARAM_U32(T1_RAIL_AUTO_ENABLE, 0, 1,     applyT1RailAuto),
+  PARAM_F32(T1_RAIL_STEP,      -2,  2,     nullptr),
+  PARAM_U32(T1_RAIL_WIN,       1,   100,   nullptr),
+  PARAM_U32(T1_RAIL_MIN_POS_PCT, 0, 100,   nullptr),
   PARAM_U32(T2_CUE_FREQ,       100, 20000, nullptr),
   PARAM_U32(T2_CUE_DUR,        1,   5000,  nullptr),
   PARAM_U32(T2_CUE_TO_WATER,   0,   5000,  nullptr),
@@ -451,6 +477,13 @@ static Inputs sense() {
   if (T1_SPOUT1_ENABLE) in.levels |= LV_SPOUT1_EN;
   if (T1_SPOUT2_ENABLE) in.levels |= LV_SPOUT2_EN;
 
+  // --- rail --------------------------------------------------------------
+  // Not a sensor read: the flag is the firmware's own record of a move in
+  // flight. It is surfaced as a level because the task layer has no other way
+  // to know, and task 1 must not score a reward against a rail position the
+  // rail is currently leaving.
+  if (g_railBusy) in.levels |= LV_RAIL_BUSY;
+
   return in;
 }
 
@@ -514,6 +547,15 @@ static void act(const ActionQueue &q, uint32_t now) {
         g_toneFreq = a.a0;
         g_toneOn   = true;
         g_pulseOn  = true;   // the first pulse is already sounding
+        break;
+
+      case ACT_RAIL_STEP:
+        // The distance comes from the tunable, not the Action: the arguments
+        // are unsigned and this step is normally negative. Same entry point as
+        // the operator's Move button, so a retraction is interlocked, backstopped
+        // and position-logged identically -- only the disposition differs.
+        railStartMove(RailHandler::mmToPulses(T1_RAIL_STEP), T1_RAIL_STEP,
+                      RAIL_CMD_AUTO);
         break;
     }
   }

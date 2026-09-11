@@ -103,7 +103,10 @@ KNOWN_KINDS = {
     "STATE": "E",     # state entered; channel = state index
     "OUTCOME": "E",   # trial ended; channel = OUTCOME_* code
     "RAIL_POS": "S",  # rail position in mm; holds until the next move
-    "RAIL_CMD": "E",  # rail command; channel = disposition, value = mm asked for
+    # Rail command. channel = what happened: 1 accepted, 2 refused (already
+    # moving), 3 set home, 4 stopped, 5 backstop timeout, 6 no stepper,
+    # 7 automatic retraction from task 1. value = millimetres asked for.
+    "RAIL_CMD": "E",
 }
 
 # Learned from "#DEF" lines at runtime; takes precedence over KNOWN_KINDS.

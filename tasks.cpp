@@ -11,6 +11,11 @@
 // ---------------------------------------------------------------------------
 extern unsigned long REWARD_INTERVAL1;
 extern unsigned long REWARD_INTERVAL2;
+// T1_RAIL_STEP is deliberately absent: the task decides whether to retract,
+// act() decides how far, so the distance is never read here.
+extern unsigned long T1_RAIL_AUTO_ENABLE;
+extern unsigned long T1_RAIL_WIN;
+extern unsigned long T1_RAIL_MIN_POS_PCT;
 extern unsigned long T2_CUE_FREQ;
 extern unsigned long T2_CUE_DUR;
 extern unsigned long T2_CUE_TO_WATER;
@@ -68,6 +73,92 @@ const char *LickRewardTask::stateName(uint8_t s) const {
   }
 }
 
+void LickRewardTask::reset(uint32_t now) {
+  Task::reset(now);
+  // A switch away and back means the rail may have been moved, the settings may
+  // have changed, and in any case a new run has begun. Rewards earned before
+  // that say nothing about the position the rail is at now.
+  clearT1RailWindow();
+}
+
+
+// ---------------------------------------------------------------------------
+//  Automatic rail retraction (task 1 only)
+//
+//  One question, asked once per delivered reward: over the last T1_RAIL_WIN
+//  rewards, was the mouse in position for at least T1_RAIL_MIN_POS_PCT of them?
+//  If not, ask for one step of the rail and start a fresh window.
+//
+//  The window is what makes this stable. A single reward is far too noisy to
+//  act on -- the switch is debounced at 50 ms and, in exactly the regime this
+//  feature exists for, it flickers. Requiring a rate over many rewards turns
+//  that noise into a number worth moving hardware for.
+// ---------------------------------------------------------------------------
+
+void LickRewardTask::clearT1RailWindow() {
+  railHead_  = 0;
+  railCount_ = 0;
+}
+
+uint8_t LickRewardTask::railWinClamped() const {
+  unsigned long w = T1_RAIL_WIN;
+  if (w < 1)             w = 1;
+  if (w > RAIL_WIN_CAP)  w = RAIL_WIN_CAP;   // CMD_TABLE caps it too; belt and
+  return (uint8_t)w;                         // braces, the buffer is fixed
+}
+
+void LickRewardTask::recordRailReward(bool inPosition) {
+  uint8_t w = railWinClamped();
+  if (w != railWin_) {
+    // The operator resized the window mid-session. Averaging entries collected
+    // under two different window lengths would mean nothing, so start over.
+    railWin_ = w;
+    clearT1RailWindow();
+  }
+  railHist_[railHead_] = inPosition;
+  railHead_ = (uint8_t)((railHead_ + 1) % w);
+  if (railCount_ < w) railCount_++;
+}
+
+bool LickRewardTask::railShouldRetract() const {
+  // Never on a partial window. Otherwise the first out-of-position reward is
+  // 0 in position out of 1, which is below any threshold, and the rail would
+  // step on the very first reward of the session.
+  if (railWin_ == 0 || railCount_ < railWin_) return false;
+
+  uint8_t inPos = 0;
+  for (uint8_t i = 0; i < railWin_; i++)
+    if (railHist_[i]) inPos++;
+
+  // inPos/win < pct/100, rearranged to integers so the threshold does not
+  // depend on float rounding: at 20 and 90% this fires at 17 in position or
+  // fewer, i.e. three failures.
+  return (uint32_t)100u * inPos < (uint32_t)T1_RAIL_MIN_POS_PCT * railWin_;
+}
+
+// Runs once per reward, from both spouts.
+void LickRewardTask::serviceRailShaping(const Inputs &in, ActionQueue &out) {
+  if (!T1_RAIL_AUTO_ENABLE) return;
+  // Mid-move: this reward belongs to neither the old rail position nor the new
+  // one, so it is not evidence about either and is dropped rather than filed
+  // under the wrong one.
+  if (in.level(LV_RAIL_BUSY)) return;
+
+  recordRailReward(in.level(LV_IN_POSITION));
+  if (railShouldRetract()) {
+    out.push(ACT_RAIL_STEP);
+    // Cleared on the ASK, not on the move. The sketch can still refuse it --
+    // no stepper attached, or the rail unexpectedly still moving -- and there
+    // is no way to tell the task, so that step is simply lost and nothing
+    // retries for another full window. Deliberate: a rail that cannot move
+    // should not be asked again every reward, and the refusal is on the wire
+    // as a RAIL_CMD line either way. If the feature looks enabled but nothing
+    // happens, look for RAIL_CMD channel 6.
+    clearT1RailWindow();
+  }
+}
+
+
 uint8_t LickRewardTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
   switch (s) {
     case T1_ARMED:
@@ -78,11 +169,18 @@ uint8_t LickRewardTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
       if (in.has(EV_LICK1) && in.level(LV_SPOUT1_EN)) {
         out.push(ACT_REWARD, 1, 0);      // 0 = spout 1's own REWARD_DURATION1
         interval_ = REWARD_INTERVAL1;
+        // Queued after the reward, so act() opens the valve before it starts
+        // the rail. Only the valve OPENING is ordered, though -- a 1 mm step
+        // takes about 940 ms, so the rail does move while the mouse is
+        // drinking. That is intended. The refractory gate is far longer than
+        // the move, so no second reward lands mid-move.
+        serviceRailShaping(in, out);
         return T1_REFRACTORY;
       }
       if (in.has(EV_LICK2) && in.level(LV_SPOUT2_EN)) {
         out.push(ACT_REWARD, 2, 0);
         interval_ = REWARD_INTERVAL2;
+        serviceRailShaping(in, out);
         return T1_REFRACTORY;
       }
       return STAY;

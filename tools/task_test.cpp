@@ -21,6 +21,9 @@
 // and are registered in CMD_TABLE; here the test owns them so it can vary them.
 unsigned long REWARD_INTERVAL1 = 3000;
 unsigned long REWARD_INTERVAL2 = 2000;
+unsigned long T1_RAIL_AUTO_ENABLE = 0;
+unsigned long T1_RAIL_WIN         = 20;
+unsigned long T1_RAIL_MIN_POS_PCT = 90;
 unsigned long T2_CUE_FREQ      = 6000;
 unsigned long T2_CUE_DUR       = 100;
 unsigned long T2_CUE_TO_WATER  = 100;
@@ -112,6 +115,8 @@ public:
                                             (unsigned)a.a0, (unsigned)a.a1);
       else if (a.verb == ACT_TONE_TRAIN)
                                    snprintf(buf, sizeof(buf), "TRAIN(%u)", (unsigned)a.a0);
+      else if (a.verb == ACT_RAIL_STEP)
+                                   snprintf(buf, sizeof(buf), "RAIL_STEP");
       else                         snprintf(buf, sizeof(buf), "?%u", a.verb);
       trace_ += buf;
     }
@@ -204,6 +209,221 @@ static void test_task1_simultaneous_licks() {
 
   h.cycle(EV_LICK1 | EV_LICK2);
   check(h.trace() == "[REFRACTORY]REWARD(1)", "spout 1 wins, and only one reward");
+}
+
+
+// ---------------------------------------------------------------------------
+//  TASK 1 -- automatic rail retraction
+//
+//  The rule under test: over the last T1_RAIL_WIN rewards, if fewer than
+//  T1_RAIL_MIN_POS_PCT were delivered with the mouse in position, ask for one
+//  rail step and start a fresh window. At the defaults (20 rewards, 90%) the
+//  threshold is 18, so three failures in twenty fire it.
+// ---------------------------------------------------------------------------
+
+// The levels for one reward, with and without the mouse on the switch.
+static const uint32_t T1_IN   = LV_IN_POSITION | LV_SPOUT1_EN | LV_SPOUT2_EN;
+static const uint32_t T1_OUT  = LV_SPOUT1_EN | LV_SPOUT2_EN;
+static const uint32_t T1_BUSY = T1_OUT | LV_RAIL_BUSY;
+
+// Deliver one reward at spout 1 with the given levels, then wait out the gate
+// so the task is armed again. The position bit only matters on the reward cycle.
+static void t1Reward(Harness &h, uint32_t levels) {
+  h.cycle(EV_LICK1, levels);
+  h.advance(REWARD_INTERVAL1 + 10);
+}
+
+static void t1Rewards(Harness &h, int n, uint32_t levels) {
+  for (int i = 0; i < n; i++) t1Reward(h, levels);
+}
+
+// How many rail steps the trace asked for.
+static int railSteps(const std::string &t) {
+  int n = 0;
+  for (size_t p = t.find("RAIL_STEP"); p != std::string::npos;
+       p = t.find("RAIL_STEP", p + 1))
+    n++;
+  return n;
+}
+
+// The defaults, restored after each test so one test cannot leak into the next.
+static void t1RailDefaults() {
+  T1_RAIL_AUTO_ENABLE = 0;
+  T1_RAIL_WIN         = 20;
+  T1_RAIL_MIN_POS_PCT = 90;
+}
+
+static void test_task1_rail_off_by_default() {
+  printf("task 1 rail: does nothing at all unless enabled\n");
+  t1RailDefaults();
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  t1Rewards(h, 40, T1_OUT);       // forty failures, twice the window
+  check(railSteps(h.trace()) == 0, "no rail step while T1_RAIL_AUTO_ENABLE is 0");
+  check(h.trace().find("REWARD(1)") != std::string::npos,
+        "water is still delivered normally");
+  t1RailDefaults();
+}
+
+static void test_task1_rail_needs_a_full_window() {
+  printf("task 1 rail: never fires on a partial window\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  // Nineteen failures is 0%, far below the threshold -- but the window is not
+  // full, and firing here would step the rail on the first reward of a session.
+  t1Rewards(h, 19, T1_OUT);
+  check(railSteps(h.trace()) == 0, "19 of 20 collected: still silent");
+
+  t1Rewards(h, 1, T1_OUT);
+  check(railSteps(h.trace()) == 1, "fires on the reward that completes the window");
+  t1RailDefaults();
+}
+
+static void test_task1_rail_threshold_is_exact() {
+  printf("task 1 rail: 18 in position holds, 17 retracts\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+
+  {   // 2 failures out of 20 = 90%, exactly the threshold -> stay put
+    Harness h(taskById(1));
+    h.cycle();
+    h.clearTrace();
+    t1Rewards(h, 2,  T1_OUT);
+    t1Rewards(h, 18, T1_IN);
+    check(railSteps(h.trace()) == 0, "18 of 20 in position: at 90%, no step");
+  }
+  {   // 3 failures out of 20 = 85% -> retract
+    Harness h(taskById(1));
+    h.cycle();
+    h.clearTrace();
+    t1Rewards(h, 3,  T1_OUT);
+    t1Rewards(h, 17, T1_IN);
+    check(railSteps(h.trace()) == 1, "17 of 20 in position: below 90%, one step");
+  }
+  t1RailDefaults();
+}
+
+static void test_task1_rail_stops_when_the_mouse_is_reliable() {
+  printf("task 1 rail: a mouse holding position stops the retraction\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  t1Rewards(h, 60, T1_IN);
+  check(railSteps(h.trace()) == 0, "60 rewards in position: never moves");
+  t1RailDefaults();
+}
+
+static void test_task1_rail_window_clears_on_firing() {
+  printf("task 1 rail: firing clears the window, so steps are spaced\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  // Sixty consecutive failures is three full windows, so exactly three steps --
+  // not one per reward after the first window fills.
+  t1Rewards(h, 60, T1_OUT);
+  check(railSteps(h.trace()) == 3, "60 failures at a 20 window = 3 steps");
+  t1RailDefaults();
+}
+
+static void test_task1_rail_ignores_rewards_during_a_move() {
+  printf("task 1 rail: a reward delivered mid-move is not evidence\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  // The rail is in transit for all of these, so they belong to neither the old
+  // position nor the new one and must not enter the window at all.
+  t1Rewards(h, 40, T1_BUSY);
+  check(railSteps(h.trace()) == 0, "40 failures while the rail moves: nothing");
+  check(h.trace().find("REWARD(1)") != std::string::npos,
+        "water is still delivered while the rail moves");
+  h.clearTrace();
+
+  // ... and the window really is empty, so a full 20 is still needed.
+  t1Rewards(h, 19, T1_OUT);
+  check(railSteps(h.trace()) == 0, "19 after the move: window started from empty");
+  t1Rewards(h, 1, T1_OUT);
+  check(railSteps(h.trace()) == 1, "the 20th fires");
+  t1RailDefaults();
+}
+
+static void test_task1_rail_window_clears_on_reset() {
+  printf("task 1 rail: a task switch discards the history\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  t1Rewards(h, 19, T1_OUT);
+  check(railSteps(h.trace()) == 0, "19 collected");
+  h.task()->reset(h.now());          // what serviceTask() does on a switch
+  h.clearTrace();
+
+  t1Rewards(h, 19, T1_OUT);
+  check(railSteps(h.trace()) == 0, "19 more after the reset: still short");
+  t1Rewards(h, 1, T1_OUT);
+  check(railSteps(h.trace()) == 1, "a full 20 post-reset fires");
+  t1RailDefaults();
+}
+
+static void test_task1_rail_window_clears_on_disable() {
+  printf("task 1 rail: turning it off discards the history\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  t1Rewards(h, 19, T1_OUT);
+  check(railSteps(h.trace()) == 0, "19 collected");
+
+  // What applyT1RailAuto() does on "SET T1_RAIL_AUTO_ENABLE 0".
+  h.task()->clearT1RailWindow();
+  h.clearTrace();
+
+  t1Rewards(h, 19, T1_OUT);
+  check(railSteps(h.trace()) == 0, "re-enabling starts from an empty window");
+  // And the feature is merely reset, not broken off: without this the test
+  // would pass just as well if clearT1RailWindow() disabled it for good.
+  t1Rewards(h, 1, T1_OUT);
+  check(railSteps(h.trace()) == 1, "a full 20 after the clear still fires");
+  t1RailDefaults();
+}
+
+static void test_task1_rail_resize_starts_over() {
+  printf("task 1 rail: resizing the window discards mixed-length history\n");
+  t1RailDefaults();
+  T1_RAIL_AUTO_ENABLE = 1;
+  Harness h(taskById(1));
+  h.cycle();
+  h.clearTrace();
+
+  t1Rewards(h, 19, T1_OUT);
+  check(railSteps(h.trace()) == 0, "19 collected under a 20 window");
+
+  T1_RAIL_WIN = 5;                   // operator narrows it mid-session
+  h.clearTrace();
+  t1Rewards(h, 4, T1_OUT);
+  check(railSteps(h.trace()) == 0,
+        "the old 19 are discarded rather than counted toward the new 5");
+  t1Rewards(h, 1, T1_OUT);
+  check(railSteps(h.trace()) == 1, "fires once the new window of 5 is full");
+  t1RailDefaults();
 }
 
 
@@ -1269,6 +1489,16 @@ int main() {
   test_task1_shared_gate_uses_that_spouts_interval();
   test_task1_disabled_spout();
   test_task1_simultaneous_licks();
+
+  test_task1_rail_off_by_default();
+  test_task1_rail_needs_a_full_window();
+  test_task1_rail_threshold_is_exact();
+  test_task1_rail_stops_when_the_mouse_is_reliable();
+  test_task1_rail_window_clears_on_firing();
+  test_task1_rail_ignores_rewards_during_a_move();
+  test_task1_rail_window_clears_on_reset();
+  test_task1_rail_window_clears_on_disable();
+  test_task1_rail_resize_starts_over();
 
   test_task2_full_trial();
   test_task2_one_reward_per_gate();

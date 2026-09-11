@@ -60,6 +60,11 @@ enum : uint32_t {
   // than inherit these by accident.
   LV_SPOUT1_EN   = 1u << 2,
   LV_SPOUT2_EN   = 1u << 3,
+  // The rail is moving. A task cannot see the rail directly, so this is how it
+  // learns to hold off: a reward delivered mid-move belongs to no rail position
+  // in particular, and scoring it against either one would be wrong. Set for
+  // manual moves too, since the rail is equally in transit either way.
+  LV_RAIL_BUSY   = 1u << 4,
 };
 
 
@@ -95,6 +100,15 @@ enum : uint8_t {
   // total duration from the same tunables when it arms its own timeout, so the
   // two can never disagree.
   ACT_TONE_TRAIN,
+  // Step the rail by T1_RAIL_STEP. No arguments, for the same reason as
+  // ACT_TONE_TRAIN: the distance is a tunable the sketch reads in act(). It
+  // could not travel in a0 anyway -- the arguments are unsigned and the step is
+  // normally negative.
+  //
+  // The task decides WHETHER to retract; the sketch decides how far, and routes
+  // it through the same rail entry point the operator's Move button uses, so
+  // the interlock and the position logging are shared rather than duplicated.
+  ACT_RAIL_STEP,
 };
 
 struct Action {
@@ -188,6 +202,7 @@ public:
   // type.
   virtual bool takeT3Prob1(uint8_t &prob) { (void)prob; return false; }
   virtual void clearT3AntiBiasHistory() {}
+  virtual void clearT1RailWindow() {}
 
   // True only when the task is at a trial boundary. The sketch defers a
   // requested task switch until this returns true, so a switch can never land

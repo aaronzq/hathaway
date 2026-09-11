@@ -69,6 +69,34 @@ unsigned long TASK = 1;
 unsigned long T1_SPOUT1_ENABLE = 1;
 unsigned long T1_SPOUT2_ENABLE = 1;
 
+// --- task 1: automatic rail retraction -------------------------------------
+// Shaping aid. The goal is a rail position at which the mouse holds the
+// in-position switch closed for every reward, rather than reaching it
+// marginally. So the rail steps away whenever recent rewards show the mouse is
+// NOT reliably in position, and stops as soon as they show it is.
+//
+// The rule is a sliding window over the last T1_RAIL_WIN rewards: if the share
+// delivered with the switch closed falls below T1_RAIL_MIN_POS_PCT, the rail
+// moves by T1_RAIL_STEP and the window is cleared. It never fires on a partial
+// window -- otherwise the first out-of-position reward is 0-of-1, which is
+// below any threshold, and the rail would step on reward one.
+//
+// Two consequences worth knowing before enabling it:
+//
+//   * The switch is sampled at the instant water is delivered, so a flickering
+//     switch counts as failure. That is deliberate: a mouse only marginally
+//     reaching the switch is the thing this is meant to move away from.
+//   * There is no bound on total travel. A mouse that never gets into position
+//     retracts at roughly one step per T1_RAIL_WIN rewards for as long as the
+//     session runs. Watch the first session; a rail driven into a hard stop
+//     loses steps, and since the position is open loop the log is then wrong
+//     for good.
+unsigned long T1_RAIL_AUTO_ENABLE = 0;   // 0 = off. Off by default: this moves
+                                         // hardware without being asked.
+float         T1_RAIL_STEP        = -1;  // mm per retraction; 0 = log only
+unsigned long T1_RAIL_WIN         = 20;  // rewards in the window
+unsigned long T1_RAIL_MIN_POS_PCT = 90;  // % in position needed to stay put
+
 // --- task 2 ----------------------------------------------------------------
 unsigned long T2_CUE_FREQ     = 6000;   // go cue frequency, Hz
 unsigned long T2_CUE_DUR      = 100;    // go cue duration, ms

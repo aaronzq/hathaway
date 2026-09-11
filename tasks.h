@@ -45,13 +45,36 @@ public:
   uint8_t     stateCount() const override { return T1_STATE_COUNT; }
   const char *stateName(uint8_t s) const override;
   bool        safeToSwitch() const override { return state() == T1_ARMED; }
+  void        reset(uint32_t now) override;   // also clears the rail window
 
 protected:
   uint8_t onEvent(uint8_t s, const Inputs &in, ActionQueue &out) override;
   void    onEntry(uint8_t s, const Inputs &in, ActionQueue &out) override;
 
+public:
+  // Discard the reward history behind the automatic rail retraction. Called on
+  // a task switch and when the operator turns the feature off, so re-enabling
+  // it always starts from a clean window rather than acting on rewards earned
+  // under settings, or a rail position, that no longer apply.
+  void clearT1RailWindow() override;
+
 private:
+  // Sliding window of recent rewards: one bit each, "was the mouse in position
+  // when this reward was delivered". Same shape as task 3's anti-bias history
+  // -- a fixed ring sized to the maximum the parameter allows, with a count so
+  // a partial window can be told from a full one.
+  static const uint8_t RAIL_WIN_CAP = 100;   // must match T1_RAIL_WIN's max
+
+  void     serviceRailShaping(const Inputs &in, ActionQueue &out);
+  void     recordRailReward(bool inPosition);
+  bool     railShouldRetract() const;
+  uint8_t  railWinClamped() const;
+
   uint32_t interval_ = 0;   // gate length chosen by the spout that rewarded
+  bool     railHist_[RAIL_WIN_CAP] = {};
+  uint8_t  railHead_  = 0;  // next slot to write
+  uint8_t  railCount_ = 0;  // rewards currently in the window
+  uint8_t  railWin_   = 0;  // window length these entries were collected under
 };
 
 
