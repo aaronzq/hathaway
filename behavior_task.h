@@ -38,7 +38,7 @@ unsigned long LICK_DEBOUNCE_TIME = 20;  // lick detector debounce, ms
 // Buzzer PWM duty cycle, percent. 50 is the plain square wave; away from it the
 // tone gets quieter and reedier without changing pitch. 0 is silence that still
 // logs and still ends with EV_TONE_DONE.
-unsigned long BUZ_PULSE_WIDTH = 25;
+unsigned long BUZ_PULSE_WIDTH = 50;
 
 unsigned long MAG_FIX_DURATION = 5000;
 // Load-cell halts are ignored for this long after the magnet turns on, ms.
@@ -93,7 +93,7 @@ unsigned long T1_SPOUT2_ENABLE = 1;
 //     for good.
 unsigned long T1_RAIL_AUTO_ENABLE = 0;   // 0 = off. Off by default: this moves
                                          // hardware without being asked.
-float         T1_RAIL_STEP        = -1;  // mm per retraction; 0 = log only
+float         T1_RAIL_STEP        = 0;  // mm per retraction; 0 = log only
 unsigned long T1_RAIL_WIN         = 20;  // rewards in the window
 unsigned long T1_RAIL_MIN_POS_PCT = 90;  // % in position needed to stay put
 
@@ -137,7 +137,7 @@ unsigned long T3_GAP_MS   = 100;        // silence between pulses, ms
 unsigned long T3_N_PULSES = 3;          // pulses per sample
 
 // The working-memory delay. Raised through training: 0 -> 300 -> 600 -> 1200.
-unsigned long T3_DELAY_MS = 300;
+unsigned long T3_DELAY_MS = 100;
 
 unsigned long T3_CUE_FREQ = 6000;       // go cue frequency, Hz
 unsigned long T3_CUE_DUR  = 100;        // go cue duration, ms. The response
