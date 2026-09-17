@@ -16,7 +16,10 @@ Scenarios covered, all of them things that actually go wrong on a rig:
 """
 import argparse
 import datetime as dt
+import json
 import math
+import pathlib
+import re
 import sys
 import time
 
@@ -242,6 +245,28 @@ def test_nothing_is_lost_on_reboot_during_warmup():
     clock = DeviceClock(warmup_s=1.0)
     got = drive(clock, pairs)
     check(len(got) == len(pairs), f"all {len(pairs)} records written (got {len(got)})")
+
+
+def test_review_dashboard_uses_device_time_only():
+    print("dashboard: session review uses device time for every time range")
+    path = pathlib.Path(__file__).parent / "grafana/provisioning/dashboards/hathaway_review.json"
+    dashboard = json.loads(path.read_text())
+    queries = [target.get("rawSql", "")
+               for panel in dashboard["panels"]
+               for target in panel.get("targets", [])]
+    queries += [item.get("query", "")
+                for item in dashboard.get("templating", {}).get("list", [])
+                if isinstance(item.get("query"), str)]
+    time_queries = [query for query in queries if "$__time" in query]
+
+    check(bool(time_queries), "session review has time-filtered queries")
+    check(all("host_ts" not in query for query in time_queries),
+          "session review never selects a time range with host_ts")
+    filter_columns = [column.strip().split(".")[-1]
+                      for query in time_queries
+                      for column in re.findall(r"\$__timeFilter\(([^)]+)\)", query)]
+    check(all(column == "dev_ts" for column in filter_columns),
+          "every session-review time filter uses dev_ts")
 
 
 # --------------------------------------------------------------------------- #
@@ -475,6 +500,7 @@ def main():
     test_reboot_with_def_hint()
     test_long_gap_is_not_a_reboot()
     test_nothing_is_lost_on_reboot_during_warmup()
+    test_review_dashboard_uses_device_time_only()
     test_control_panel()
     test_session_increments_on_remove_and_add()
     if args.pg:

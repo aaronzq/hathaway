@@ -122,7 +122,7 @@
           "type": "postgres",
           "uid": "hathaway_pg"
         },
-        "query": "SELECT count(*) FROM events_dev WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(host_ts)",
+        "query": "SELECT count(*) FROM events_dev WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(dev_ts)",
         "refresh": 2,
         "hide": 2,
         "multi": false,
@@ -187,7 +187,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, value AS weight FROM samples_dev WHERE type = 'WEIGHT' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, value AS weight FROM samples_dev WHERE type = 'WEIGHT' AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -290,7 +290,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 1 AS lick1 FROM events_dev WHERE type = 'LICK' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 1 AS lick1 FROM events_dev WHERE type = 'LICK' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "B",
@@ -300,7 +300,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 3 AS lick2 FROM events_dev WHERE type = 'LICK' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 3 AS lick2 FROM events_dev WHERE type = 'LICK' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "C",
@@ -310,7 +310,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 1.5 AS reward1 FROM events_dev WHERE type = 'REWARD' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 1.5 AS reward1 FROM events_dev WHERE type = 'REWARD' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "D",
@@ -320,7 +320,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 3.5 AS reward2 FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 3.5 AS reward2 FROM events_dev WHERE type = 'REWARD' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "E",
@@ -331,7 +331,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Outcome rows. All five sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach.\r\n--\r\n-- Kept as separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "-- Outcome rows. All five sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach.\r\n--\r\n-- Kept as separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "F",
@@ -342,7 +342,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 5 AS incorrect FROM events_dev WHERE type = 'OUTCOME' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 5 AS incorrect FROM events_dev WHERE type = 'OUTCOME' AND channel = 1 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "G",
@@ -353,7 +353,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 5 AS \"no response\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 5 AS \"no response\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 2 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "H",
@@ -364,7 +364,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 5 AS abort FROM events_dev WHERE type = 'OUTCOME' AND channel = 3 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 5 AS abort FROM events_dev WHERE type = 'OUTCOME' AND channel = 3 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "I",
@@ -375,7 +375,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT dev_ts AS time, 5 AS teach FROM events_dev WHERE type = 'OUTCOME' AND channel = 4 AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "SELECT dev_ts AS time, 5 AS teach FROM events_dev WHERE type = 'OUTCOME' AND channel = 4 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -638,7 +638,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "-- Keeps the 0..1 band; MAGNET and BUZZER are offset above it.\r\n(SELECT $__timeFrom()::timestamptz AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND session_id = $session AND host_ts < $__timeFrom() ORDER BY t_us DESC LIMIT 1) UNION ALL (SELECT dev_ts AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts)) ORDER BY time"
+          "rawSql": "-- Keeps the 0..1 band; MAGNET and BUZZER are offset above it.\r\n(SELECT $__timeFrom()::timestamptz AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND session_id = $session AND dev_ts < $__timeFrom() ORDER BY t_us DESC LIMIT 1) UNION ALL (SELECT dev_ts AS time, value AS position FROM samples_dev WHERE type = 'POSITION' AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts)) ORDER BY time"
         },
         {
           "refId": "B",
@@ -649,7 +649,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Offset into the 1.5..2.5 band. Stored values are still 0/1.\r\n(SELECT $__timeFrom()::timestamptz AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND session_id = $session AND host_ts < $__timeFrom()\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts))\r\nORDER BY time"
+          "rawSql": "-- Offset into the 1.5..2.5 band. Stored values are still 0/1.\r\n(SELECT $__timeFrom()::timestamptz AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND session_id = $session AND dev_ts < $__timeFrom()\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time, value + 1.5 AS magnet\r\n   FROM samples_dev\r\n  WHERE type = 'MAGNET' AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts))\r\nORDER BY time"
         },
         {
           "refId": "C",
@@ -660,7 +660,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Offset into the 3..4 band: 4 while a note sounds, 3 when silent.\r\n-- (TONE stores the frequency in Hz, so 'sounding' is value > 0.)\r\n--\r\n-- The first branch is the carry-in, same as POSITION and MAGNET above: it\r\n-- looks just before the window, takes the last known state and draws it at\r\n-- the left edge, so the line starts there instead of at the first row inside\r\n-- the window. Bounded to 10 minutes -- unbounded it would reach back days into\r\n-- an earlier session and paint a flat 'silent' line across a window that has\r\n-- no tone data at all.\r\n--\r\n-- Filters are on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks. dev_ts is computed per row, so\r\n-- filtering on it means scanning every chunk on every refresh. dev_ts is still\r\n-- what gets PLOTTED; only the row selection uses host_ts, and the two never\r\n-- differ by more than the serial read cycle.\r\n(SELECT $__timeFrom()::timestamptz AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE'\r\n    AND rig_id = $rig AND session_id = $session AND host_ts <  $__timeFrom()::timestamptz\r\n    AND host_ts >= $__timeFrom()::timestamptz - interval '10 minutes'\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE' AND rig_id = $rig AND session_id = $session AND $__timeFilter(host_ts))\r\nORDER BY time"
+          "rawSql": "-- Offset into the 3..4 band: 4 while a note sounds, 3 when silent.\r\n-- (TONE stores the frequency in Hz, so 'sounding' is value > 0.)\r\n--\r\n-- The first branch is the carry-in, same as POSITION and MAGNET above: it\r\n-- looks just before the window, takes the last known state and draws it at\r\n-- the left edge, so the line starts there instead of at the first row inside\r\n-- the window. Bounded to 10 minutes -- unbounded it would reach back days into\r\n-- an earlier session and paint a flat 'silent' line across a window that has\r\n-- no tone data at all.\r\n--\r\n-- Session review uses dev_ts for both row selection and plotting, so the\r\n-- selected range follows the device clock even if the PC wall clock changes.\r\n(SELECT $__timeFrom()::timestamptz AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE'\r\n    AND rig_id = $rig AND session_id = $session AND dev_ts <  $__timeFrom()::timestamptz\r\n    AND dev_ts >= $__timeFrom()::timestamptz - interval '10 minutes'\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE' AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts))\r\nORDER BY time"
         }
       ],
       "fieldConfig": {
@@ -765,7 +765,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1,\n       count(*) FILTER (WHERE channel = 2) AS reward2\n  FROM events_dev\n WHERE type = 'REWARD' AND session_id = $session AND $__timeFilter(host_ts)"
+          "rawSql": "SELECT count(*) FILTER (WHERE channel = 1) AS reward1,\n       count(*) FILTER (WHERE channel = 2) AS reward2\n  FROM events_dev\n WHERE type = 'REWARD' AND session_id = $session AND $__timeFilter(dev_ts)"
         }
       ],
       "fieldConfig": {
@@ -847,7 +847,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\n       count(*) FILTER (WHERE channel = 4) AS \"teach\"\n  FROM events_dev\n WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(host_ts)"
+          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\n       count(*) FILTER (WHERE channel = 4) AS \"teach\"\n  FROM events_dev\n WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(dev_ts)"
         }
       ],
       "fieldConfig": {
@@ -1018,7 +1018,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- 24 hourly bins for the selected session and selected time range, zero-filled.\nWITH bins AS (\n  SELECT generate_series(0, 23) AS hr\n),\ntrials AS (\n  SELECT date_part('hour', e.host_ts AT TIME ZONE 'America/Los_Angeles')::int AS hr,\n         count(*) AS n\n    FROM events_dev e\n   WHERE e.type = 'OUTCOME' AND e.session_id = $session AND $__timeFilter(e.host_ts)\n   GROUP BY 1\n)\nSELECT lpad(b.hr::text, 2, '0') || ':00' AS \"hour\",\n       COALESCE(t.n, 0)::bigint          AS \"trials\"\n  FROM bins b\n  LEFT JOIN trials t ON t.hr = b.hr\n ORDER BY b.hr"
+          "rawSql": "-- 24 hourly bins for the selected session and selected time range, zero-filled.\nWITH bins AS (\n  SELECT generate_series(0, 23) AS hr\n),\ntrials AS (\n  SELECT date_part('hour', e.dev_ts AT TIME ZONE 'America/Los_Angeles')::int AS hr,\n         count(*) AS n\n    FROM events_dev e\n   WHERE e.type = 'OUTCOME' AND e.session_id = $session AND $__timeFilter(e.dev_ts)\n   GROUP BY 1\n)\nSELECT lpad(b.hr::text, 2, '0') || ':00' AS \"hour\",\n       COALESCE(t.n, 0)::bigint          AS \"trials\"\n  FROM bins b\n  LEFT JOIN trials t ON t.hr = b.hr\n ORDER BY b.hr"
         }
       ],
       "fieldConfig": {
