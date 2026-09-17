@@ -364,10 +364,12 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(T3_ANTI_BIAS_AUTO_ENABLE, 0, 1, applyT3AntiBiasAuto),
   PARAM_U32(T3_ANTI_BIAS_WIN,   1,   100,   nullptr),
   PARAM_U32(T3_ANTI_BIAS_ACC_THRESH, 0, 100, nullptr),
-  // Percent chance an unanswered trial is rescued with water at the correct
-  // spout. 0 = off. Keep low; see the warning in behavior_task.h.
+  // Percent chance an enabled failure type is rescued with water at the
+  // correct spout. 0 = off. Keep low; see the warning in behavior_task.h.
   PARAM_U32(T3_TEACH_PROB,     0,   100,   nullptr),
   PARAM_U32(T3_TEACH_INCLUDE_ABORT, 0, 1,   nullptr),
+  PARAM_U32(T3_TEACH_INCLUDE_INCORRECT, 0, 1, nullptr),
+  PARAM_U32(T3_TEACH_INCLUDE_NO_RESPONSE, 0, 1, nullptr),
   
   ACTION(TARE, doTare),
 

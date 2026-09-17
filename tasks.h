@@ -163,9 +163,10 @@ private:
 //  T3_ANTI_BIAS_PROB1 skews the split when auto mode is off. With auto mode on,
 //  the task stores recent HIT/INCORRECT trials and adjusts the split toward the
 //  type with the higher failure rate; non-answer outcomes do not enter that
-//  history. T3_TEACH_PROB rescues unanswered trials with water at the correct
-//  spout -- booked as OUTCOME_TEACH, never as a hit. T3_TEACH_INCLUDE_ABORT
-//  extends that rescue chance to pre-go-cue aborts.
+//  history. T3_TEACH_PROB is the shared rescue probability for failure types
+//  enabled by T3_TEACH_INCLUDE_ABORT, T3_TEACH_INCLUDE_INCORRECT, and
+//  T3_TEACH_INCLUDE_NO_RESPONSE. A rescue gives water at the correct spout and
+//  is booked as OUTCOME_TEACH, never as a hit.
 //
 //  The names here are 1 and 2 throughout, never "left" and "right": the mapping
 //  from spout number to physical side is a property of the rig, not of the code,
@@ -181,13 +182,13 @@ private:
 //    INCORRECT    lick on the other spout        -> T3_PUNISH_MS timeout
 //    NO_RESPONSE  the window closed unanswered, OR the animal left the port
 //                 after the go cue without answering
-//    TEACH        as NO_RESPONSE, but rescued: water at the correct spout, on
-//                 T3_TEACH_PROB percent of them. If T3_TEACH_INCLUDE_ABORT is
-//                 set, pre-go-cue aborts can also be rescued this way
+//    TEACH        an enabled ABORT, INCORRECT, or NO_RESPONSE rescued with water
+//                 at the correct spout on T3_TEACH_PROB percent of trials
 //    ABORT        the animal left the port before the go cue and was not rescued
 //  Every one of them then serves T3_ITI_MS, aborts included. Discrimination
-//  performance is HIT/(HIT+INCORRECT): TEACH gave water without testing
-//  anything, and TEACH+NO_RESPONSE are the trials that went unanswered.
+//  performance is HIT/(HIT+INCORRECT); a rescued incorrect answer is booked as
+//  TEACH and therefore excluded from that measure. TEACH+NO_RESPONSE includes
+//  all unanswered trials only when no-response teaching is the sole rescue type.
 //
 //  Water uses REWARD_DURATION1 / REWARD_DURATION2 -- the same valve times as
 //  every other task. There is deliberately no task-3 override: how long a spout
@@ -198,7 +199,7 @@ private:
 //      DELAY     --T3_DELAY_MS--> GOCUE
 //      GOCUE     --T3_CUE_DUR-->  RESPONSE
 //      RESPONSE  --correct-->     REWARD  (water) --T3_CONSUME_MS--> ITI
-//      RESPONSE  --wrong-->       PUNISH  --T3_PUNISH_MS-->          ITI
+//      RESPONSE  --wrong-->       REWARD if rescued, else PUNISH --> ITI
 //      RESPONSE  --window shut, or left the port--> REWARD if rescued, else ITI
 //      DELAY     --lick, if T3_EARLY_LICK_PUNISH--> EARLY_PAUSE
 //      EARLY_PAUSE      --T3_EARLY_LICK_PAUSE_MS-->  DELAY (full time)

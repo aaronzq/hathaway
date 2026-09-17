@@ -40,6 +40,8 @@ extern unsigned long T3_ANTI_BIAS_WIN;
 extern unsigned long T3_ANTI_BIAS_ACC_THRESH;
 extern unsigned long T3_TEACH_PROB;
 extern unsigned long T3_TEACH_INCLUDE_ABORT;
+extern unsigned long T3_TEACH_INCLUDE_INCORRECT;
+extern unsigned long T3_TEACH_INCLUDE_NO_RESPONSE;
 extern unsigned long T3_EARLY_LICK_PUNISH;
 extern unsigned long T3_EARLY_LICK_PAUSE_MS;
 
@@ -518,6 +520,7 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
         return T3_REWARD;
       }
       if (in.has(wrong)) {
+        if (T3_TEACH_INCLUDE_INCORRECT && rescueTeach(out)) return T3_REWARD;
         pending_ = OUTCOME_INCORRECT;
         return T3_PUNISH;
       }
@@ -527,7 +530,7 @@ uint8_t DiscriminationTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &ou
         // Drawn only when the feature is on, so with T3_TEACH_PROB at 0 the
         // random stream is untouched and a scripted trial sequence stays
         // reproducible.
-        if (rescueTeach(out)) return T3_REWARD;   // shares the consumption period
+        if (T3_TEACH_INCLUDE_NO_RESPONSE && rescueTeach(out)) return T3_REWARD;
         pending_ = OUTCOME_NO_RESPONSE;
         return T3_ITI;
       }

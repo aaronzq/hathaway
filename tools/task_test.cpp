@@ -48,6 +48,8 @@ unsigned long T3_ANTI_BIAS_WIN = 30;
 unsigned long T3_ANTI_BIAS_ACC_THRESH = 65;
 unsigned long T3_TEACH_PROB      = 0;
 unsigned long T3_TEACH_INCLUDE_ABORT = 0;
+unsigned long T3_TEACH_INCLUDE_INCORRECT = 0;
+unsigned long T3_TEACH_INCLUDE_NO_RESPONSE = 1;
 unsigned long T3_EARLY_LICK_PUNISH = 1;
 unsigned long T3_EARLY_LICK_PAUSE_MS = 100;
 
@@ -833,6 +835,50 @@ static void test_task3_teach_can_include_abort() {
   T3_TEACH_INCLUDE_ABORT = si;
 }
 
+static void test_task3_teach_excludes_incorrect_by_default() {
+  printf("task 3: T3_TEACH_INCLUDE_INCORRECT = 0 keeps wrong answers unrescued\n");
+  unsigned long sp = T3_TEACH_PROB, si = T3_TEACH_INCLUDE_INCORRECT;
+  T3_TEACH_PROB = 100;
+  T3_TEACH_INCLUDE_INCORRECT = 0;
+  setRand({0});                            // type 1, so spout 2 is wrong
+
+  Harness h(taskById(3));
+  toResponse(h);
+  h.clearTrace();
+
+  h.cycle(EV_LICK2);
+  check(h.trace() == "[PUNISH]", "even at 100% teach probability, a wrong lick is punished");
+  h.advance(T3_PUNISH_MS);
+  check(h.task()->outcomeCount(OUTCOME_INCORRECT) == 1, "booked as INCORRECT");
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 0, "not as TEACH");
+
+  T3_TEACH_PROB = sp;
+  T3_TEACH_INCLUDE_INCORRECT = si;
+}
+
+static void test_task3_teach_can_include_incorrect() {
+  printf("task 3: T3_TEACH_INCLUDE_INCORRECT = 1 lets T3_TEACH_PROB rescue wrong answers\n");
+  unsigned long sp = T3_TEACH_PROB, si = T3_TEACH_INCLUDE_INCORRECT;
+  T3_TEACH_PROB = 100;
+  T3_TEACH_INCLUDE_INCORRECT = 1;
+  setRand({0, 0});                         // type 1, then rescue draw passes
+
+  Harness h(taskById(3));
+  toResponse(h);
+  h.clearTrace();
+
+  h.cycle(EV_LICK2);
+  check(h.trace() == "[REWARD]REWARD(1)",
+        "a wrong lick can immediately trigger water at the correct spout");
+  h.advance(T3_CONSUME_MS);
+  check(h.trace() == "[REWARD]REWARD(1)[ITI]", "teach reward uses consumption, then ITI");
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 1, "booked as TEACH");
+  check(h.task()->outcomeCount(OUTCOME_INCORRECT) == 0, "not as INCORRECT");
+
+  T3_TEACH_PROB = sp;
+  T3_TEACH_INCLUDE_INCORRECT = si;
+}
+
 static void test_task3_early_lick_replays_delay() {
   printf("task 3: T3_EARLY_LICK_PUNISH pauses only delay licks, then replays delay\n");
   setRand({0});                            // every draw is type 1
@@ -1031,6 +1077,26 @@ static void test_task3_teach_rescues_a_walk_off_too() {
   check(h.task()->outcomeCount(OUTCOME_TEACH) == 1, "also booked as TEACH");
 
   T3_TEACH_PROB = 0;
+}
+
+static void test_task3_teach_can_exclude_no_response() {
+  printf("task 3: T3_TEACH_INCLUDE_NO_RESPONSE = 0 keeps unanswered trials unrescued\n");
+  unsigned long sp = T3_TEACH_PROB, si = T3_TEACH_INCLUDE_NO_RESPONSE;
+  T3_TEACH_PROB = 100;
+  T3_TEACH_INCLUDE_NO_RESPONSE = 0;
+  setRand({0});
+
+  Harness h(taskById(3));
+  toResponse(h);
+  h.clearTrace();
+
+  h.advance(T3_RESPONSE_MS);
+  check(h.trace() == "[ITI]", "even at 100% teach probability, no-response goes to ITI");
+  check(h.task()->outcomeCount(OUTCOME_NO_RESPONSE) == 1, "booked as NO_RESPONSE");
+  check(h.task()->outcomeCount(OUTCOME_TEACH) == 0, "not as TEACH");
+
+  T3_TEACH_PROB = sp;
+  T3_TEACH_INCLUDE_NO_RESPONSE = si;
 }
 
 static void test_task3_teach_off_gives_a_plain_no_response() {
@@ -1517,6 +1583,8 @@ int main() {
   test_task3_abort_wins_over_a_simultaneous_lick();
   test_task3_teach_excludes_abort_by_default();
   test_task3_teach_can_include_abort();
+  test_task3_teach_excludes_incorrect_by_default();
+  test_task3_teach_can_include_incorrect();
   test_task3_early_lick_replays_delay();
   test_task3_aborted_delay_pause_does_not_shorten_next_delay();
   test_task3_early_lick_tolerated();
@@ -1525,6 +1593,7 @@ int main() {
   test_task3_max_repeat_caps_the_bias();
   test_task3_teach_rescues_a_deadline();
   test_task3_teach_rescues_a_walk_off_too();
+  test_task3_teach_can_exclude_no_response();
   test_task3_teach_off_gives_a_plain_no_response();
   test_task3_teach_draw_only_when_enabled();
   test_task3_type2_maps_to_spout2();

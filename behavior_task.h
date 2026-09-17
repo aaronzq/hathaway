@@ -185,25 +185,26 @@ unsigned long T3_ANTI_BIAS_AUTO_ENABLE = 0;
 unsigned long T3_ANTI_BIAS_WIN = 10;
 unsigned long T3_ANTI_BIAS_ACC_THRESH = 75;
 
-// Teaching rescue: the probability, IN PERCENT, that a trial which got no answer
-// after the go cue is given water at the CORRECT spout anyway, to show the
-// animal where the answer was. 0 disables it. Set T3_TEACH_INCLUDE_ABORT to
-// also apply this same chance to trials aborted before the go cue.
+// Teaching rescue: the probability, IN PERCENT, that an enabled failure type is
+// given water at the CORRECT spout anyway, to show the animal where the answer
+// was. 0 disables all teaching. The three INCLUDE flags independently enable
+// teaching after an abort, an incorrect answer, or no response.
 //
-// Booked as OUTCOME_TEACH, never as a hit: nothing was discriminated. It is a
+// Booked as OUTCOME_TEACH, never as a hit or incorrect answer. It is a
 // softer form of the prompt Guo et al. 2014 give by hand ("water delivery by
 // manually clicking a computer-controlled valve was necessary to prompt the mice
 // to lick the other lickport"), and it pairs with T3_ANTI_BIAS_PROB1 -- a biased
 // animal gets both more trials of the neglected type and more guided rescues on
 // them.
 //
-// KEEP IT LOW, and set it back to 0 once the animal is answering. Guessing at
-// random earns water on half of trials at the cost of a timeout on the other
-// half; doing nothing earns water on this fraction of trials at no cost at all.
-// Much above 50 and withholding becomes the better strategy outright, and it is
-// tempting well below that.
+// KEEP IT LOW, and set it back to 0 once the animal is answering. Enabling
+// no-response teaching can reward withholding; enabling incorrect teaching can
+// replace a wrong answer's timeout with water. High probabilities can therefore
+// reinforce the failure behavior teaching is meant to correct.
 unsigned long T3_TEACH_PROB = 0;
 unsigned long T3_TEACH_INCLUDE_ABORT = 0;
+unsigned long T3_TEACH_INCLUDE_INCORRECT = 0;
+unsigned long T3_TEACH_INCLUDE_NO_RESPONSE = 1;
 
 // What a lick during the delay does. 1 = pause briefly, then replay the full
 // delay. 0 = log the lick and ignore it, which is how an animal that
