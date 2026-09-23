@@ -3,10 +3,10 @@
 #include <Arduino.h>
 #include <FastAccelStepper.h>
 
-#define RAIL_DEFAULT_SPEED_HZ 3200u
-#define RAIL_CALIBRATION_MM_TO_PULSE 3020.0f
-#define RAIL_DIRECTION_DELAY_US 200u
-#define RAIL_ACCELERATION_STEPS_S2 1000000
+extern const uint32_t RAIL_DEFAULT_SPEED_HZ;
+extern const float RAIL_CALIBRATION_MM_TO_PULSE;
+extern const int32_t RAIL_ACCELERATION_STEPS_S2;
+extern const uint32_t RAIL_DIRECTION_DELAY_US;
 
 class RailHandler {
 public:

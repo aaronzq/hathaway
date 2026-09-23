@@ -12,6 +12,17 @@
 // It is attached to every serial message so the database can tell rigs apart.
 const int RIG_ID = 1;
 
+// Load cell
+const float SCALE_CALIBRATION = 636.5f; //Rig 1
+// const float SCALE_CALIBRATION = 656.19f; //Rig 2
+// const float SCALE_CALIBRATION = 606.19f; //Rig 3
+
+// Motor rail
+extern const uint32_t RAIL_DEFAULT_SPEED_HZ = 800u;
+extern const int32_t RAIL_ACCELERATION_STEPS_S2 = 20000;
+extern const float RAIL_CALIBRATION_MM_TO_PULSE = 1510.0f;
+extern const uint32_t RAIL_DIRECTION_DELAY_US = 200u;
+
 
 // TFT display
 const float ANGLES[]    = {0, 45, 90, 135};

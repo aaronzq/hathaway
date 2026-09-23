@@ -7,3 +7,5 @@ __pycache__/
 *.dump
 backup*.sql
 AGENTS.md
+.superpowers/brainstorm/1834-1789672982/state/server-instance-id
+.superpowers/brainstorm/1834-1789672982/state/server.pid

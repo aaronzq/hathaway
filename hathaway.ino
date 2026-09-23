@@ -680,7 +680,7 @@ void setup() {
   scale.begin(LOADCELL_DOUT_PIN, LOADCELL_SCK_PIN);
   scale.set_scale();
   scale.tare();
-  scale.set_scale(636.5f);
+  scale.set_scale(SCALE_CALIBRATION);
 
   randomSeed(esp_random());   // hardware RNG seed so trials differ each run
 
