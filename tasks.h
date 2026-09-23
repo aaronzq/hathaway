@@ -145,6 +145,52 @@ private:
 
 
 // ===========================================================================
+//  TASK 4 -- reward-triggered tone at one spout at a time, gated by position
+//
+//  Out of position, nothing happens. In position, the machine waits for a lick
+//  on the active spout. That lick delivers water and plays the tone in the same
+//  cycle, then closes the reward gate. When the gate expires, licking is live
+//  again without a preceding cue.
+//
+//  Spout alternation and zero-length blocks have the same meaning as task 2,
+//  but task 4 has its own T4_N1 and T4_N2 settings.
+//
+//      IDLE       --in position-->                 WAIT_LICK
+//      WAIT_LICK  --lick on the active spout-->    REFRACTORY  (water + tone)
+//      REFRACTORY --REWARD_INTERVALn elapsed-->    WAIT_LICK
+//      any state  --out of position-->             IDLE
+// ===========================================================================
+
+enum : uint8_t {
+  T4_IDLE = 0,
+  T4_WAIT_LICK,
+  T4_REFRACTORY,
+  T4_STATE_COUNT,
+};
+
+class RewardToneTask : public Task {
+public:
+  const char *name() const override { return "REWARD_TONE"; }
+  uint8_t     stateCount() const override { return T4_STATE_COUNT; }
+  const char *stateName(uint8_t s) const override;
+  bool        safeToSwitch() const override { return state() == T4_IDLE; }
+  void        reset(uint32_t now) override;
+
+protected:
+  uint8_t onEvent(uint8_t s, const Inputs &in, ActionQueue &out) override;
+  void    onEntry(uint8_t s, const Inputs &in, ActionQueue &out) override;
+
+private:
+  void selectSide();
+  void advanceBlock();
+
+  uint8_t  side_     = 1;
+  uint32_t done_     = 0;
+  uint32_t interval_ = 0;
+};
+
+
+// ===========================================================================
 //  TASK 3 -- two-tone discrimination with a delay, gated by position
 //
 //  The animal hears one of two tones, holds it across a silent delay, and then

@@ -29,6 +29,10 @@ unsigned long T2_CUE_DUR       = 100;
 unsigned long T2_CUE_TO_WATER  = 100;
 unsigned long T2_N1            = 3;
 unsigned long T2_N2            = 2;
+unsigned long T4_CUE_FREQ      = 6000;
+unsigned long T4_CUE_DUR       = 100;
+unsigned long T4_N1            = 3;
+unsigned long T4_N2            = 2;
 unsigned long T3_SAMPLE_FREQ1  = 12000;
 unsigned long T3_SAMPLE_FREQ2  = 3000;
 unsigned long T3_PULSE_MS      = 150;
@@ -595,6 +599,144 @@ static void test_task2_both_blocks_zero_stops_the_task() {
 
   T2_N1 = s1;
   T2_N2 = s2;
+}
+
+
+// ===========================================================================
+//  TASK 4 -- reward-triggered tone at one spout at a time, gated by position
+// ===========================================================================
+
+static void test_task4_full_trial() {
+  printf("task 4: in position -> lick -> water plus tone -> gate -> wait again\n");
+  Task *task = taskById(4);
+  check(task != nullptr, "task 4 is registered");
+  if (task == nullptr) return;
+  Harness h(task);
+
+  h.cycle(0, AWAY);
+  check(h.trace() == "[IDLE]", "starts in IDLE and stays there out of position");
+  h.clearTrace();
+
+  h.cycle();
+  check(h.trace() == "[WAIT_LICK]", "arrival opens the lick window without a tone");
+  h.clearTrace();
+
+  h.cycle(EV_LICK2);
+  check(h.trace() == "", "a lick on the blocked spout does nothing");
+
+  h.cycle(EV_LICK1);
+  check(h.trace() == "[REFRACTORY]REWARD(1)TONE(6000,100)",
+        "the active lick delivers water and tone in the same cycle");
+  check(h.task()->trial() == 1, "the trial is counted when water is delivered");
+  h.clearTrace();
+
+  h.advance(2999);
+  check(h.trace() == "", "the rewarded spout's refractory interval remains active");
+  h.advance(2);
+  check(h.trace() == "[WAIT_LICK]", "the lick window reopens without another tone");
+}
+
+static void test_task4_entry_cycle_lick_is_ignored() {
+  printf("task 4: licking on the position-entry cycle does not earn water\n");
+  Harness h(taskById(4));
+
+  h.cycle(0, AWAY);
+  h.clearTrace();
+  h.cycle(EV_LICK1);
+  check(h.trace() == "[WAIT_LICK]", "entry only opens the lick window");
+  check(h.task()->trial() == 0, "the entry-cycle lick is not counted");
+  h.clearTrace();
+
+  h.cycle(EV_LICK1);
+  check(h.trace() == "[REFRACTORY]REWARD(1)TONE(6000,100)",
+        "a new lick after entry earns water and tone");
+}
+
+static void test_task4_alternation() {
+  printf("task 4: T4_N1 rewards at spout 1, then T4_N2 at spout 2\n");
+  Harness h(taskById(4));
+
+  for (uint32_t i = 0; i < 20000; i++) { h.bump(1); h.cycle(EV_LICK1 | EV_LICK2); }
+
+  std::string seq = rewardSeq(h.trace());
+  check(seq.size() >= 6, "at least six rewards in 20 s");
+  check(seq.substr(0, 6) == "111221", "the configured spout blocks repeat");
+}
+
+static void test_task4_leaving_cancels_gate_but_keeps_block() {
+  printf("task 4: leaving cancels the gate but keeps the alternation count\n");
+  Harness h(taskById(4));
+
+  h.cycle();
+  h.cycle(EV_LICK1);
+  h.clearTrace();
+  h.advance(500);
+  h.cycle(0, AWAY);
+  check(h.trace() == "[IDLE]", "leaving during the gate returns to IDLE");
+  h.clearTrace();
+
+  h.cycle();
+  check(h.trace() == "[WAIT_LICK]", "returning immediately opens the lick window");
+  h.clearTrace();
+
+  for (uint32_t i = 0; i < 10000; i++) { h.bump(1); h.cycle(EV_LICK1 | EV_LICK2); }
+  check(rewardSeq(h.trace()).substr(0, 3) == "112",
+        "the block resumes at reward 2 of 3 rather than restarting");
+}
+
+static void test_task4_leaving_wait_returns_to_idle() {
+  printf("task 4: leaving while waiting returns directly to IDLE\n");
+  Harness h(taskById(4));
+
+  h.cycle();
+  check(h.task()->state() == T4_WAIT_LICK, "the lick window is open");
+  h.clearTrace();
+  h.cycle(0, AWAY);
+  check(h.trace() == "[IDLE]", "position loss closes the lick window");
+}
+
+static void test_task4_uses_its_own_block_settings() {
+  printf("task 4: task 2 block settings do not alter task 4\n");
+  unsigned long saved = T2_N1;
+  T2_N1 = 0;
+
+  Harness h(taskById(4));
+  h.cycle();
+  h.clearTrace();
+  h.cycle(EV_LICK1);
+  check(h.trace() == "[REFRACTORY]REWARD(1)TONE(6000,100)",
+        "spout 1 remains active under T4_N1");
+
+  T2_N1 = saved;
+}
+
+static void test_task4_zero_blocks() {
+  printf("task 4: zero block lengths retire spouts\n");
+  unsigned long s1 = T4_N1, s2 = T4_N2;
+  T4_N1 = 0;
+
+  Harness oneRetired(taskById(4));
+  for (uint32_t i = 0; i < 10000; i++) {
+    oneRetired.bump(1);
+    oneRetired.cycle(EV_LICK1 | EV_LICK2);
+  }
+  std::string seq = rewardSeq(oneRetired.trace());
+  check(!seq.empty() && seq.find('1') == std::string::npos,
+        "T4_N1 = 0 leaves only spout 2 active");
+
+  T4_N2 = 0;
+  Harness bothRetired(taskById(4));
+  bothRetired.cycle();
+  bothRetired.clearTrace();
+  for (uint32_t i = 0; i < 5000; i++) {
+    bothRetired.bump(1);
+    bothRetired.cycle(EV_LICK1 | EV_LICK2);
+  }
+  check(bothRetired.trace() == "", "both zero waits without water or tone");
+  check(bothRetired.task()->trial() == 0, "both zero counts no trial");
+
+  T4_N1 = s1;
+  T4_N2 = s2;
 }
 
 
@@ -1574,6 +1716,14 @@ int main() {
   test_task2_ignores_the_task1_flags();
   test_task2_zero_block_retires_a_spout();
   test_task2_both_blocks_zero_stops_the_task();
+
+  test_task4_full_trial();
+  test_task4_entry_cycle_lick_is_ignored();
+  test_task4_alternation();
+  test_task4_leaving_cancels_gate_but_keeps_block();
+  test_task4_leaving_wait_returns_to_idle();
+  test_task4_uses_its_own_block_settings();
+  test_task4_zero_blocks();
 
   test_task3_hit_trial();
   test_task3_incorrect();

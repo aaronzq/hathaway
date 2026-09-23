@@ -322,7 +322,7 @@ static const CmdSpec CMD_TABLE[] = {
   // TASK is applied lazily, at the next trial boundary -- see serviceTask().
   // The PARAM ack therefore means "request accepted"; the TASK telemetry line
   // marks the cycle on which the switch actually happened.
-  PARAM_U32(TASK,              1,   3,     nullptr),
+  PARAM_U32(TASK,              1,   4,     nullptr),
   PARAM_U32(T1_SPOUT1_ENABLE,  0,   1,     nullptr),
   PARAM_U32(T1_SPOUT2_ENABLE,  0,   1,     nullptr),
   // Automatic rail retraction. See behavior_task.h for what it does and the two
@@ -339,6 +339,11 @@ static const CmdSpec CMD_TABLE[] = {
   // is how task 2 takes a spout out of use; both zero leaves nothing to run.
   PARAM_U32(T2_N1,             0,   10000, nullptr),
   PARAM_U32(T2_N2,             0,   10000, nullptr),
+  // --- task 4 --------------------------------------------------------------
+  PARAM_U32(T4_CUE_FREQ,       100, 20000, nullptr),
+  PARAM_U32(T4_CUE_DUR,        1,   5000,  nullptr),
+  PARAM_U32(T4_N1,             0,   10000, nullptr),
+  PARAM_U32(T4_N2,             0,   10000, nullptr),
   // --- task 3 --------------------------------------------------------------
   PARAM_U32(T3_SAMPLE_FREQ1,   100, 20000, nullptr),
   PARAM_U32(T3_SAMPLE_FREQ2,   100, 20000, nullptr),

@@ -21,6 +21,10 @@ extern unsigned long T2_CUE_DUR;
 extern unsigned long T2_CUE_TO_WATER;
 extern unsigned long T2_N1;
 extern unsigned long T2_N2;
+extern unsigned long T4_CUE_FREQ;
+extern unsigned long T4_CUE_DUR;
+extern unsigned long T4_N1;
+extern unsigned long T4_N2;
 extern unsigned long T3_SAMPLE_FREQ1;
 extern unsigned long T3_SAMPLE_FREQ2;
 extern unsigned long T3_PULSE_MS;
@@ -309,6 +313,74 @@ void CuedRewardTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) {
     default:
       break;
   }
+}
+
+
+// ===========================================================================
+//  TASK 4 -- reward-triggered tone at one spout at a time, gated by position
+// ===========================================================================
+
+const char *RewardToneTask::stateName(uint8_t s) const {
+  switch (s) {
+    case T4_IDLE:       return "IDLE";
+    case T4_WAIT_LICK:  return "WAIT_LICK";
+    case T4_REFRACTORY: return "REFRACTORY";
+    default:            return "?";
+  }
+}
+
+void RewardToneTask::reset(uint32_t now) {
+  Task::reset(now);
+  side_ = 1;
+  done_ = 0;
+}
+
+void RewardToneTask::selectSide() {
+  if (T4_N1 == 0 && T4_N2 == 0)      { side_ = 0; done_ = 0; return; }
+  if (side_ == 1 && T4_N1 == 0)      { side_ = 2; done_ = 0; return; }
+  if (side_ == 2 && T4_N2 == 0)      { side_ = 1; done_ = 0; return; }
+  if (side_ == 0)                    { side_ = (T4_N1 > 0) ? 1 : 2; done_ = 0; }
+}
+
+void RewardToneTask::advanceBlock() {
+  done_++;
+  const uint32_t n = (side_ == 1) ? T4_N1 : T4_N2;
+  if (done_ >= n) {
+    side_ = (side_ == 1) ? 2 : 1;
+    done_ = 0;
+  }
+}
+
+uint8_t RewardToneTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
+  if (s != T4_IDLE && !in.level(LV_IN_POSITION)) return T4_IDLE;
+
+  switch (s) {
+    case T4_IDLE:
+      if (in.level(LV_IN_POSITION)) return T4_WAIT_LICK;
+      return STAY;
+
+    case T4_WAIT_LICK:
+      if (side_ != 0 && in.has(side_ == 1 ? EV_LICK1 : EV_LICK2)) {
+        out.push(ACT_REWARD, side_, 0);
+        out.push(ACT_TONE, T4_CUE_FREQ, T4_CUE_DUR);
+        interval_ = (side_ == 1) ? REWARD_INTERVAL1 : REWARD_INTERVAL2;
+        countTrial(OUTCOME_HIT);
+        advanceBlock();
+        return T4_REFRACTORY;
+      }
+      return STAY;
+
+    case T4_REFRACTORY:
+      if (in.has(EV_TIMEOUT)) return T4_WAIT_LICK;
+      return STAY;
+  }
+  return STAY;
+}
+
+void RewardToneTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) {
+  (void)in; (void)out;
+  if (s == T4_WAIT_LICK) selectSide();
+  if (s == T4_REFRACTORY) setTimeout(interval_);
 }
 
 
@@ -610,11 +682,13 @@ void DiscriminationTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) 
 static LickRewardTask     g_task1;
 static CuedRewardTask     g_task2;
 static DiscriminationTask g_task3;
+static RewardToneTask     g_task4;
 
 static const TaskSpec TASK_TABLE[] = {
   { 1, &g_task1 },
   { 2, &g_task2 },
   { 3, &g_task3 },
+  { 4, &g_task4 },
 };
 static const uint8_t TASK_TABLE_N = sizeof(TASK_TABLE) / sizeof(TASK_TABLE[0]);
 

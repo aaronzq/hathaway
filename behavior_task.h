@@ -65,6 +65,8 @@ float SCALE_LOW_THRESH  = 10.0;
 //                       one spout at a time (T2_N1 then T2_N2 rewards)
 //   3 = DISCRIMINATION  in position -> sample tone -> delay -> go cue ->
 //                       lick spout 1 or 2 -> water or timeout
+//   4 = REWARD_TONE     in position -> lick active spout -> water plus tone ->
+//                       gate -> wait for the next lick
 // The switch is DEFERRED until the running task reaches a trial boundary, so
 // setting this mid-trial is safe. The TASK telemetry line marks the cycle on
 // which it actually took effect.
@@ -125,6 +127,17 @@ unsigned long T2_CUE_TO_WATER = 100;    // cue ONSET -> licks count, ms. Licks
 // and then nothing, which is the task's way of saying "stop".
 unsigned long T2_N1 = 3;
 unsigned long T2_N2 = 3;
+
+// --- task 4 ----------------------------------------------------------------
+// The tone begins in the same control cycle as water delivery. Unlike task 2,
+// there is no cue on arrival and no cue-to-water delay.
+unsigned long T4_CUE_FREQ = 6000;   // reward-associated tone frequency, Hz
+unsigned long T4_CUE_DUR  = 100;    // reward-associated tone duration, ms
+
+// Same block alternation and zero-to-retire convention as task 2, but these
+// settings are independent so changing one task cannot alter the other.
+unsigned long T4_N1 = 3;
+unsigned long T4_N2 = 3;
 
 // --- task 3 ----------------------------------------------------------------
 // Two-tone discrimination with a delay. Trial type 1 plays T3_SAMPLE_FREQ1 and
