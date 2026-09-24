@@ -314,7 +314,7 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(REWARD_INTERVAL1,  0,   60000, nullptr),
   PARAM_U32(REWARD_INTERVAL2,  0,   60000, nullptr),
   PARAM_U32(LICK_DEBOUNCE_TIME, 0,  100,   applyLickDebounceTime),
-  PARAM_U32(MAG_FIX_DURATION,  0,   60000, applyMagFixDuration),
+  PARAM_U32(MAG_FIX_DURATION,  0,   300000, applyMagFixDuration),
   PARAM_U32(MAG_GRACE_MS,      0,   60000, applyMagGrace),
   PARAM_U32(BUZ_PULSE_WIDTH,   0,   100,   applyBuzPulseWidth),
   PARAM_F32(SCALE_HIGH_THRESH, -50, 50,    nullptr),
