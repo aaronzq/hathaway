@@ -94,7 +94,7 @@ transmission delay never skews recorded event time.
 | Line | Meaning | When |
 |---|---|---|
 | `1\|#DEF LICK,E` | LICK is an **E**vent (`S` = state **S**ample) | Startup and on `DUMP` |
-| `1\|PARAM:REWARD_DURATION1,50` | Current value of a parameter | Startup, on `DUMP`, after each `SET` |
+| `1\|PARAM:REWARD_DURATION1,50,12345` | Current value of a parameter, with device timestamp | Startup, on `DUMP`, after each `SET` |
 | `1\|#TARE ok` | An action finished | After the action runs |
 | `1\|#ERR parse: xyz` | Line not understood | Immediately, from core 0 |
 | `1\|#ERR unknown: FOO` | No such parameter | Immediately |
@@ -118,6 +118,7 @@ DUMP        (or GET)        re-send the schema and all parameter values
 2. `emit()` packs a 12-byte `TelemRec {type, channel, value, dev_ms}` and pushes
    it onto `telemQueue` with a zero timeout. If the queue is full it increments
    `g_dropped` and returns. **It never waits.**
+   These 12 bytes describe the internal memory record, not the transmitted text size.
 3. `commsTask` on core 0 wakes, pops the record, and calls `protoFormat()`.
 4. `protoFormat()` writes `1|`, finds the row with `id == TELEM_LICK`, sees no
    custom formatter, and calls `FMT_STD`, producing `LICK:1,1,12350\n`.
@@ -137,7 +138,7 @@ DUMP        (or GET)        re-send the schema and all parameter values
    - `protoStore()` writes `75` into `REWARD_DURATION1` via the row's pointer,
    - calls the row's `apply` function, `applyRewardDuration1(75)`, which calls
      `rewarder1.setRewardDuration(75)`,
-   - emits `PARAM:REWARD_DURATION1,75` as the ack.
+   - emits `PARAM:REWARD_DURATION1,75,<device_ms>` as the ack.
 5. The ack travels back out through the normal telemetry path.
 
 The ack reports the value **actually stored**, so if a `%g`/integer conversion
@@ -317,7 +318,7 @@ Apply functions run on the **control core**, so they may safely touch device
 objects. Define them above the table.
 
 That is everything. `SET TRIAL_DURATION 300` now works, it is range-checked,
-acked with `PARAM:TRIAL_DURATION,300`, included in every `DUMP`, and reported at
+acked with `PARAM:TRIAL_DURATION,300,<device_ms>`, included in every `DUMP`, and reported at
 startup. (`SET TRIAL_DURATION 5000` would be refused with
 `#ERR range: TRIAL_DURATION=5000`, since the row's `hi` is 600.) No host change: `control_panel.py` builds its UI from the `PARAM:` lines
 each rig reports.
@@ -375,10 +376,10 @@ by name, so no test edit is needed.
 |---|---|---|
 | Telemetry queue | 128 records | Oldest work continues; new records dropped, `Comms::dropped()` counts them |
 | Command queue | 8 | `#ERR busy:` |
-| Outbound line | 96 bytes incl. prefix | Line dropped whole, never truncated |
+| Outbound telemetry line | 95 transmitted bytes incl. prefix and newline; 96-byte buffer reserves one byte for the text terminator | Line dropped whole, never truncated |
 | Inbound line | 63 characters | The first 63 characters are discarded and the *remainder* is parsed as if it were a fresh line — usually producing a stray `#ERR parse:` |
 | Command / parameter name | 31 characters | Silently truncated by `protoFirstToken` / `%31s`, so it stops matching |
-| Parameter precision | `float`, 24-bit mantissa | Integers above ~16.7 million lose precision. Current ranges top out at 60000, so this is not yet a concern. |
+| Parameter precision | `float`, 24-bit mantissa | Integers above ~16.7 million lose precision. Current integer parameter ranges top out at 300000, so this is not yet a concern. |
 | `%g` output | 6 significant digits | `12.3456789` prints as `12.3457` |
 
 ---
@@ -433,3 +434,84 @@ python3 ingest.py --source simulate --db print
 | `Comms::dropped()` climbing | Telemetry faster than the UART; raise the baud rate or emit less |
 | Nothing parses on the host | The `<rig>\|` prefix is not being stripped — `parse_hathaway` handles it, but a custom consumer may not |
 | Host misfiles a new type as an event | Its `#DEF` was missed. `control_panel.py` sends `DUMP` on connect; a plain reader must ask or rely on `KNOWN_KINDS` |
+
+---
+
+## 16. Bandwidth estimation
+
+**Budget about 1.1 kilobytes/second outbound per rig for serial telemetry,
+plus 50 megabytes/second for each behavior camera.** With 10 weight readings
+and an assumed 20 event messages per second, this uses about **10% of each rig's
+115200-baud hardware serial connection**. Adding rigs increases shared USB and
+computer workload, but does not divide that individual serial allowance.
+
+### Traffic required
+
+Estimates include text framing and newlines, but exclude USB overhead and extra
+command replies. They assume a one-digit rig ID and the longest timestamp.
+Telemetry maximum sizes range from 22 to 37 bytes by type; budgeting 37 bytes
+for all 30 messages gives 1110 bytes/second. Weight alone needs at most 350
+bytes/second at 10 readings/second. Extra rig-ID digits add one byte per message.
+
+| Rigs | Outbound: rig to computer | Inbound example: computer to rigs* |
+|---:|---:|---:|
+| 1 | 1.11 kilobytes/second | 0.64 kilobytes/second |
+| 10 | 11.1 kilobytes/second | 6.4 kilobytes/second |
+| 20 | 22.2 kilobytes/second | 12.8 kilobytes/second |
+
+*Inbound assumes 10 maximum-length commands per second per rig: 63 characters
+plus newline, or 64 bytes each. Actual traffic depends on commands sent; this is
+not a guaranteed command execution rate. `SET` and actions add outbound replies;
+`DUMP` adds a burst of schema, parameters and state. Parameter replies can reach
+50 bytes and errors 78 bytes. One kilobyte here means 1000 bytes.
+
+### Behavior cameras: future scaling attention
+
+Allow **50 megabytes/second per camera over USB**, based on 1 million pixels,
+8-bit grayscale (1 byte/pixel), and 50 frames/second, before USB overhead.
+With one camera per rig, 4 rigs need approximately 200 megabytes/second,
+10 need 500 megabytes/second, and 20 need 1000 megabytes/second for images alone.
+Camera traffic dominates the serial telemetry and travels on its own camera
+connection, not through the ESP32 or the control panel's telemetry queue.
+
+For the IDS UI-series camera used with peak Cockpit, JPEG video recording on
+the computer reduces disk usage, not the raw USB transfer rate. Actual disk
+traffic depends on JPEG quality and scene content.
+[IDS UI camera formats](https://www.1stvision.com/cameras/IDS/IDS-manuals/en/ueye-intro.html),
+[Cockpit video recording](https://www.1stvision.com/cameras/IDS/IDS-manuals/en/record-videos.html).
+
+**Before scaling camera count, test all cameras and rigs while recording.**
+Ten cameras at this budget exceed the practical payload capacity of one shared
+5-gigabit/second USB connection. Check which hubs and computer controllers are
+shared, camera receive rates and dropped frames, processor load from JPEG
+compression, disk write rate, and telemetry queue growth. Plan camera distribution
+across independent controllers as needed; additional sockets alone do not ensure
+additional bandwidth. The supported simultaneous camera count is not yet measured.
+
+### Where scaling can be limited
+
+| Stage | Capacity and possible bottleneck |
+|---|---|
+| Serial channel, per rig | At 115200 baud with 8 data bits, no parity and 1 stop bit: **11520 bytes/second independently in each direction**. The outbound budget uses 9.6%; the inbound example uses 5.6%. Native USB serial may not be physically limited by the baud setting. |
+| ESP32 USB interface | ESP32-S3 native USB signals at **12 megabits/second**. A separate USB-to-serial bridge has its own USB speed and serial limit. Usable throughput is below the signaling rate. |
+| USB link and hub | All rigs on a hub share its upstream capacity. A USB 3 hub does not upgrade USB 2 rigs to USB 3 speeds; they use its USB 2 path. Hub design, negotiated link speed and other attached devices can limit the combined traffic. |
+| Computer USB controller | USB 3 commonly signals at **5 gigabits/second**, with 10 and 20 gigabit variants. Different sockets may share a controller. These advertised rates are not application throughput or the speed available to USB 2 rigs. |
+| Python ingestion and database | One reader thread per port feeds **one shared queue and one database worker**. Adding rigs adds readers, not database writers. Sustained input above the worker's processing and saving rate causes backlog. |
+
+USB speed references: [Espressif USB documentation](https://docs.espressif.com/projects/esp-faq/en/latest/software-framework/peripherals/usb.html)
+and [USB-IF speed classes](https://www.usb.org/usb-32-0).
+
+**No bottleneck has been demonstrated for serial telemetry alone.** The single
+database worker is a potential shared limit; with cameras, shared USB capacity,
+video processing and storage also need measurement.
+It writes when a batch reaches 200 records or the 0.5-second time threshold is
+reached; this is not a 400-record/second ceiling. For example, 200 records saved
+in 50 milliseconds would mean 4000 records/second before other processing costs.
+At 30 messages/second per rig, 20 rigs produce roughly 600 records/second, plus
+any additional records created by the parser.
+
+The queue has no configured size limit. More memory absorbs temporary slowdowns,
+but does not improve sustained write speed or protect unsaved data from crashes.
+The current writer also discards a batch after a database write error. Measure
+queue growth and database write times under load to establish a supported rig
+count; low per-rig serial usage alone is not sufficient.
