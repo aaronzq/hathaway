@@ -15,6 +15,50 @@ Build trials from ordered state intervals and the following `OUTCOME`, using
 `t_us` then `seq`. Do not join every state, lick, and outcome only on equal
 numeric `value`.
 
+## Trial boundaries and single-session retrieval
+
+Use these boundaries for the current firmware. State numbers are task-specific.
+
+| Task | Start | Completed end and outcome |
+|---|---|---|
+| 1 | Entry to `REFRACTORY` (1), when an accepted lick triggers reward | Entry to `ARMED` (0) after the refractory timeout; `HIT` |
+| 2 | Entry to `CUE` (1) | Entry to `REFRACTORY` (3), when the accepted lick triggers reward; `HIT`. The refractory wait follows completion. |
+| 3 | Entry to `SAMPLE1` (1) or `SAMPLE2` (2) | Entry to `ITI` (8); outcome is `HIT`, `INCORRECT`, `NO_RESPONSE`, `ABORT`, or `TEACH`. The ITI wait follows completion. |
+| 4 | Entry to `WAIT_LICK` (1) | Entry to `REFRACTORY` (2), when the accepted lick triggers reward and tone; `HIT`. The refractory wait follows completion. |
+
+For a requested session:
+
+1. Confirm the rig and active task. Read `STATE`, `OUTCOME`, and `PARAM_*`
+   from `events_dev`, and `TASK` from `samples_dev`. If TASK observations are
+   absent, use an explicit user-provided task identification and disclose it;
+   do not substitute PARAM_TASK as proof of activation.
+2. Within the same session and rig, order by `(t_us, seq)`. Pair a start with
+   its task-specific end before another start, task switch, or reset. Task-3
+   `EARLY_PAUSE` and repeated `DELAY` entries remain within the same trial.
+3. The firmware emits the completion STATE before OUTCOME in the same cycle,
+   with the same device timestamp and completed counter. Match that following
+   OUTCOME to the end; validate its timestamp, sequence order and counter.
+   Read the outcome code from OUTCOME.channel, not OUTCOME.value. If a match
+   is absent or ambiguous, mark the outcome unknown rather than inferring it.
+4. Number report rows 1, 2, 3, ... in chronological order within the session.
+   Retain firmware counters only as diagnostic fields. They are not globally
+   unique trial IDs. A counter decrease is a reset boundary: do not connect
+   a start before it to an end after it.
+5. Keep missing-start or missing-end fragments explicitly marked; never
+   invent a boundary or outcome. An observed task-3 ABORT with sample and ITI
+   boundaries is a complete trial, not a recording fragment. In tasks 2/4,
+   return to IDLE before completion ends an abandoned attempt without a
+   firmware outcome. Keep it separate from completed trials and do not label
+   it OUTCOME_ABORT. Leaving during refractory does not undo their completion.
+6. Retrieve parameters using the rules in `telemetry.md`. A start snapshot
+   describes confirmed settings, not necessarily every value actually used.
+   Retain trial type, outcome, spout, boundaries, and relevant parameter-use
+   information in intermediate results. Verify starts, ends and outcomes
+   reconcile, reporting fragments and unmatched records separately.
+
+An incomplete trial can still have a known outcome when only its start is
+missing. Its trial-start parameters remain unknown.
+
 ## Task 1: `LICK_REWARD`
 
 Either enabled spout rewards a lick. Both share a refractory gate. Disabled
@@ -61,6 +105,35 @@ Standard analyses:
 - reward rate, block progression, and parameter history.
 
 ## Task 3: `DISCRIMINATION`
+
+Classify trials as with magnet (`1`) or without magnet (`0`) using the
+MAGNET sample value in effect at entry to `GOCUE` (STATE channel 4).
+Use the latest valid MAGNET sample at or before that entry in `(t_us, seq)`
+order, within the same session and rig; samples hold until changed. Do not
+substitute magnet state at sample entry, reward, or any other trial time.
+Show this binary indicator in every trial-table row instead of magnet
+duration/grace settings or hold histories. Keep raw settings in saved data.
+A complete trial that never enters GOCUE is `N/A`, not `0`. Missing go-cue
+coverage in a recording fragment, or no preceding valid MAGNET sample, is
+`Unknown`. Keep these rows separate from the two classified groups.
+
+Include a `Sample` column: `1` for SAMPLE1 entry, `2` for SAMPLE2 entry;
+use `Unknown` if the sample entry is missing, without inferring it from outcome.
+
+Include an `Early lick` indicator: `1` if either spout has a LICK event while
+the current state is DELAY (3), otherwise `0` for a fully observed trial that
+entered DELAY. Order LICK and STATE events by `(t_us, seq)`; a state holds
+until the next transition. A complete trial that never enters DELAY is `N/A`.
+For recording fragments, positive evidence can establish `1`; lack of evidence
+is `Unknown`, not `0` or `N/A`. Do not count licks during sample, GOCUE, or
+EARLY_PAUSE as delay licks.
+
+When T3_EARLY_LICK_PUNISH is enabled, a delay lick normally causes EARLY_PAUSE
+(9) followed by a replay of DELAY. EARLY_PAUSE is positive evidence even if
+the trial aborts before the replay begins. Replay is not a universal substitute
+for LICK events: punishment can be disabled, and leaving position takes
+priority over early-lick punishment. Use raw delay licks as the primary rule
+and state transitions as confirmation; report missing telemetry or disagreement.
 
 Type 1 uses sample tone 1 and correct spout 1; type 2 uses sample tone 2 and
 correct spout 2. The animal hears a pulsed sample, waits through a delay, hears

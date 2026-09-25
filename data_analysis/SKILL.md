@@ -8,8 +8,13 @@ description: Use when querying, parsing, interpreting, checking, or analyzing Ha
 ## Purpose
 
 Use the PostgreSQL service, not Docker's volume files. Treat the database as
-read-only unless the user explicitly asks for a data change. Keep new analysis
-scripts and their tests under `data_analysis/`.
+read-only unless the user explicitly asks for a data change.
+
+For each analysis task, create a descriptively named subfolder under
+`data_analysis/`. Save the analysis scripts, task-specific tests, and generated
+results in that subfolder. Include the dependencies and exact run command so
+the user can reproduce the results independently. Record the data selection,
+time zone, and assumptions needed to reproduce the analysis.
 
 ## Required references
 
@@ -25,6 +30,11 @@ Read the reference that matches the work before writing a query or analysis:
 For any trial-level analysis, read all three references. Confirm meanings
 against the source files named in each reference if the firmware or schema has
 changed since the reference was written.
+Follow "Trial boundaries and single-session retrieval" in
+`references/tasks-and-analyses.md` and "Parameters used by a trial" in
+`references/telemetry.md`. Report trials in chronological order with local
+row numbers, include outcomes, and distinguish completed aborts from missing
+recording boundaries and abandoned attempts.
 
 ## Analysis contract
 

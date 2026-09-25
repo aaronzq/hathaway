@@ -74,9 +74,45 @@ produced by `DUMP`/`GET`; the database does not label which caused it. Therefore
 do not count parameter rows as changes. Compare each value with the preceding
 value when identifying actual changes.
 
-Use the last parameter event at or before a trial. `trial_params` performs this
-lookup for trial starts. Older parameter records may have `t_us = 0`; they
-cannot be placed reliably within a session.
+Use the last parameter event at or before a trial in `(t_us, seq)` order, within
+the same session and rig. Retrieve `PARAM_<NAME>` records from `events_dev`
+and perform this lookup within the analysis at the reconstructed trial start. A confirmation later in sequence at the same timestamp does not
+apply retroactively. Missing starts cannot support a parameter snapshot. Older
+parameter records may have `t_us = 0`; they cannot be placed reliably within a
+session and are excluded. Values are confirmed settings, not proof that a
+latched task parameter changed mid-trial. Requested `PARAM_TASK` remains a
+parameter and does not establish active task identity.
+
+### Parameters used by a trial
+
+The analysis goal is the values used, not a command-change audit. When a value
+is constant over all relevant read points, its confirmed value can be used.
+When it varies, inspect where the firmware reads or latches it; do not assign
+one trial-start value to the whole trial without checking. Missing coverage
+or ambiguous ordering must be reported as unknown, not filled from defaults.
+
+For task 3, `tasks.cpp` reads sample settings at sample entry, delay duration
+at every DELAY entry (including replays), go-cue settings at GOCUE entry,
+response duration at RESPONSE entry, consumption duration at REWARD entry,
+punishment duration at PUNISH entry, and early-pause duration at EARLY_PAUSE
+entry. Teaching settings are evaluated at the rescue decision. Valve duration
+is read when the reward action executes. ITI duration is read at ITI entry
+and describes the following inter-trial wait. Task-selection probability can
+be adjusted by anti-bias; use `T3_PROB1` telemetry for the effective draw
+probability rather than equating it with PARAM_T3_ANTI_BIAS_PROB1.
+
+`magnet.cpp` latches MAG_FIX_DURATION and MAG_GRACE_MS at magnet activation;
+their setters change defaults for the next activation, not the running hold.
+Use the parameter values before the activation, with MAGNET transitions and
+manual-start telemetry where available. An initial MAGNET=1 snapshot alone
+does not establish when the hold started or which duration it latched.
+SCALE_HIGH_THRESH and SCALE_LOW_THRESH are read for each weight measurement;
+if they vary during a trial, there is no single threshold for that whole trial.
+
+Present values at their relevant phases or intervals when necessary. Keep
+configured settings and reconstructed values used clearly distinguished;
+report-only compression of unchanged values must not discard full parameter
+information from the saved analysis results.
 
 ## PC-to-rig commands and database visibility
 
@@ -92,9 +128,10 @@ firmware responses and telemetry, not the raw outbound command stream.
 | `RAIL_MOVE_MM` / `RAIL_MOVE_PULSES` | Produces `RAIL_CMD` telemetry describing accepted, refused, unavailable, or timed-out execution; a completed move produces `RAIL_POS`. |
 | `RAIL_SET_HOME` / `RAIL_STOP` | Produces the corresponding `RAIL_CMD` disposition and an updated `RAIL_POS` when applicable. |
 
-For task-based analysis, use `TASK` samples to determine the active task over
-time. Use `PARAM_TASK` only to show the requested configuration. Never assume
-that their timestamps are identical.
+For task-based analysis, use `TASK` samples from `samples_dev` to determine the
+active task over time. Use `PARAM_TASK` only to show the requested configuration.
+Never assume that their timestamps are identical. If a recording starts after
+task activation, task identity may be missing; report this rather than guessing.
 
 For audit questions such as “exactly which buttons did the operator press,”
 state that the database is incomplete: repeated snapshots, rejected `SET`

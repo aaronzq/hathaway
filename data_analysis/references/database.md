@@ -98,12 +98,17 @@ Instantaneous records. It has the same columns as `samples`.
 
 - `samples_dev`: `samples` plus `dev_ts = to_timestamp(t_us / 1e6)`.
 - `events_dev`: `events` plus the same `dev_ts` conversion.
-- `trial_params`: parameter value in force at each recorded trial start, in
-  long form: `session_id`, `rig_id`, `trial`, `trial_start`, `param`, `value`.
+
+For trial-level analysis, retrieve states, outcomes, and parameter confirmations
+from `events_dev`. Use `samples_dev` for active `TASK` observations. Reconstruct
+trials within the analysis using the applicable firmware rules.
 
 The authoritative definition is
 `serial_logging_test/pc/schema.sql`. Database writes are implemented by
 `serial_logging_test/pc/ingest.py` and used by `control_panel.py`.
+Docker runs the schema on first initialization; `PostgresDB` also runs it on
+connection. Removing a view definition from this file does not drop a view
+already installed in an existing database.
 
 ## Time and ordering
 
