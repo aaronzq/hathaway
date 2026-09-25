@@ -16,6 +16,7 @@ public:
     void setFixDuration(unsigned long duration);  // update default hold time
     void setGraceDuration(unsigned long duration);
     bool haltAllowed() const;   // false while inside the post-start grace window
+    bool on() const { return isOn; }
 
 private:
     int magnetPin;

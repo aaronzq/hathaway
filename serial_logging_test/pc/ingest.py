@@ -107,6 +107,9 @@ KNOWN_KINDS = {
     # moving), 3 set home, 4 stopped, 5 backstop timeout, 6 no stepper,
     # 7 automatic retraction from task 1. value = millimetres asked for.
     "RAIL_CMD": "E",
+    # Magnet start from the panel. channel = 1 accepted, 2 refused (already
+    # on), 3 refused (not in position). value = 0.
+    "MAG_CMD": "E",
 }
 
 # Learned from "#DEF" lines at runtime; takes precedence over KNOWN_KINDS.

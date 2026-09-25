@@ -550,6 +550,9 @@ class Controller:
     def send_rail_stop(self, rig_id):
         return self._send_action(rig_id, "RAIL_STOP", "RAIL_STOP")
 
+    def send_mag_start(self, rig_id):
+        return self._send_action(rig_id, "MAG_START", "MAG_START")
+
     def snapshot(self):
         with self.lock:
             rigs = {str(rid): st.snapshot() for rid, st in self.rigs.items()}
@@ -637,6 +640,11 @@ def make_app():
     @app.post("/api/rig/{rig_id}/rail/stop")
     def rail_stop(rig_id: int):
         ok, msg = CTRL.send_rail_stop(rig_id)
+        return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
+
+    @app.post("/api/rig/{rig_id}/magnet/start")
+    def mag_start(rig_id: int):
+        ok, msg = CTRL.send_mag_start(rig_id)
         return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
 
     @app.on_event("shutdown")
@@ -784,6 +792,9 @@ HTML_PAGE = """<!doctype html>
         <div class="w" id="ctlweight">&mdash;</div>
         <div class="wl">weight</div>
         <div style="margin-top:8px"><button id="tarebtn">Tare</button></div>
+        <hr>
+        <div class="wl">magnet</div>
+        <div style="margin-top:8px"><button id="magstartbtn">Start</button></div>
         <hr>
         <div class="w small" style="margin-top:0" id="ctlrail">&mdash;</div>
         <div class="wl">rail</div>
@@ -973,6 +984,7 @@ document.getElementById('rigsel').onchange=function(){selectedRig=this.value;
   if(lastState)renderControl(lastState);};
 document.getElementById('tarebtn').onclick=function(){if(selectedRig)tareRig(Number(selectedRig));};
 document.getElementById('fetchbtn').onclick=function(){if(selectedRig)fetchRig(Number(selectedRig));};
+document.getElementById('magstartbtn').onclick=function(){if(selectedRig)post('/api/rig/'+selectedRig+'/magnet/start');};
 document.getElementById('railunit').querySelectorAll('span').forEach(function(s){
   s.onclick=function(){railSetUnit(s.getAttribute('data-unit'));};});
 document.getElementById('railmovebtn').onclick=function(){if(selectedRig)railMove(Number(selectedRig));};

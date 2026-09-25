@@ -122,6 +122,15 @@ enum : uint8_t {
   TELEM_T3_PROB1, // channel 1, value = effective type-1 draw probability %
   TELEM_RAIL_CMD, // channel = RAIL_CMD_* disposition, value = commanded mm
   TELEM_RAIL_POS, // channel 1, value = rail position in mm
+  TELEM_MAG_CMD,  // channel = MAG_CMD_* disposition, value = 0
+};
+
+// What happened to a MAG_START from the panel. The "#MAG_START ok" ack only
+// means the line arrived, so the outcome is logged here.
+enum : uint8_t {
+  MAG_CMD_ACCEPTED       = 1,   // magnet session started
+  MAG_CMD_REFUSED_ON     = 2,   // magnet was already on; nothing happened
+  MAG_CMD_REFUSED_NO_POS = 3,   // position switch off; nothing happened
 };
 
 // Why a RAIL_CMD line was written. The disposition is on the wire so that
@@ -169,6 +178,7 @@ static const TelemSpec TELEM_TABLE[] = {
   // there is exactly one unit in the log whichever way the operator asked.
   { TELEM_RAIL_CMD, "RAIL_CMD", TELEM_EVENT  },
   { TELEM_RAIL_POS, "RAIL_POS", TELEM_SAMPLE },
+  { TELEM_MAG_CMD,  "MAG_CMD",  TELEM_EVENT  },
 };
 static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 
@@ -209,6 +219,22 @@ static void applyT1RailAuto(float v) {
   }
 }
 static void doTare(float)                 { scale.tare(); }   // blocks ~1 s
+
+// Operator-started magnet session. Same rules as one started by the switch:
+// the grace window, the scale release in supervise() and the timeout in update().
+static void doMagStart(float) {
+  uint32_t now = millis();
+  if (magnet.on()) {
+    Comms::emit(TELEM_MAG_CMD, MAG_CMD_REFUSED_ON, 0.0f, now);
+    return;
+  }
+  if (!sw.getState()) {
+    Comms::emit(TELEM_MAG_CMD, MAG_CMD_REFUSED_NO_POS, 0.0f, now);
+    return;
+  }
+  magnet.magnetic_start();
+  Comms::emit(TELEM_MAG_CMD, MAG_CMD_ACCEPTED, 0.0f, now);
+}
 
 // --- rail ------------------------------------------------------------------
 // All four run on the control core, from Comms::service(). movePulses() and
@@ -377,6 +403,7 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(T3_TEACH_INCLUDE_NO_RESPONSE, 0, 1, nullptr),
   
   ACTION(TARE, doTare),
+  ACTION(MAG_START, doMagStart),
 
   // --- rail ----------------------------------------------------------------
   // Actions, not parameters, and that distinction is the safety property: the
