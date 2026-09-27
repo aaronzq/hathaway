@@ -7,7 +7,7 @@ does, and the exact steps to add or remove a message, a parameter, or a command.
 
 ## 1. The idea in one paragraph
 
-`hathaway.ino` is for the animal task. It never calls `Serial`. When something
+`RX-105-Xi/RX-105-Xi.ino` is for the animal task. It never calls `Serial`. When something
 happens it calls `Comms::emit(...)`; when the host changes a setting the change
 appears in a global variable by itself. Everything between those two points —
 formatting, the second CPU core, queues, parsing, range checks, acks, errors —
@@ -21,7 +21,7 @@ any communication code.
 
 | File | What it is | How often you edit it |
 |---|---|---|
-| `hathaway.ino` | The task, plus `TELEM_TABLE` and `CMD_TABLE` | Every time you add a message or command |
+| `RX-105-Xi/RX-105-Xi.ino` | The task, plus `TELEM_TABLE` and `CMD_TABLE` | Every time you add a message or command |
 | `protocol.h` | Wire mechanism: record types, table types, formatter, parser | Almost never |
 | `comms.h` | The facility's public API (6 functions) | Never |
 | `comms.cpp` | The engine: queues, the core-0 task, dispatch | Almost never |
@@ -205,7 +205,7 @@ host that attaches mid-session gets the `#DEF` schema and current `PARAM:` value
 
 Say you want to log trial onset, with the grating angle as the value.
 
-**Step 1 — add an id** to the enum in `hathaway.ino`. Order does not matter; keep
+**Step 1 — add an id** to the enum in `RX-105-Xi/RX-105-Xi.ino`. Order does not matter; keep
 it below 240.
 
 ```cpp
@@ -291,7 +291,7 @@ Say you want the trial duration settable at run time.
 unsigned long TRIAL_DURATION = 3;   // seconds; GratingHandler::setDuration takes seconds
 ```
 
-**Step 2 — add a table row** in `hathaway.ino`. Pass the *variable name*, not a
+**Step 2 — add a table row** in `RX-105-Xi/RX-105-Xi.ino`. Pass the *variable name*, not a
 string — the macro stringifies it, so the wire name can never drift.
 
 ```cpp
@@ -394,7 +394,7 @@ cd tools
 Needs only `g++` and `python3` — no ESP32, no upload. It:
 
 1. pulls the pre-refactor firmware out of git,
-2. slices the real tables out of `hathaway.ino` and the real old functions out of
+2. slices the real tables out of `RX-105-Xi/RX-105-Xi.ino` and the real old functions out of
    the old sketch, so the test compares actual code rather than a transcription,
 3. checks every line the firmware can emit against its exact expected bytes,
 4. round-trips those lines through the real `parse_hathaway()` and confirms type,

@@ -4,7 +4,7 @@
 // Tunables read by the tasks. Declared extern, not included from
 // behavior_task.h, because that header DEFINES them (see the note in tasks.h).
 // The host sets them live with "SET <NAME> <VALUE>"; the ranges and acks are
-// handled by CMD_TABLE in hathaway.ino.
+// handled by CMD_TABLE in RX-105-Xi.ino.
 //
 // tools/task_test.cpp defines these itself, which is how the tasks can be run
 // on a PC without any of the firmware.

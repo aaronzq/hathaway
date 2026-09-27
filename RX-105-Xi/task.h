@@ -7,7 +7,7 @@
 // Same split as protocol.h / comms.cpp: this header defines *how* a task is
 // structured and knows nothing about spouts, tones, scales or magnets. The
 // tasks themselves live in tasks.h/tasks.cpp; the hardware wiring lives in
-// hathaway.ino.
+// RX-105-Xi.ino.
 //
 // The control loop runs three phases, in this order, every cycle:
 //

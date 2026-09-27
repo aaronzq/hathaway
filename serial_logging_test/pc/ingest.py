@@ -93,7 +93,7 @@ def _dev_us(parts, idx):
 KNOWN_KINDS = {
     "WEIGHT": "S", "POSITION": "S", "MAGNET": "S",
     "LICK": "E", "REWARD": "E",
-    # Keep this in step with TELEM_TABLE in hathaway.ino. It is only a fallback,
+    # Keep this in step with TELEM_TABLE in RX-105-Xi/RX-105-Xi.ino. It is only a fallback,
     # but a WRONG fallback is worse than no fallback: a sample misfiled as an
     # event lands in the wrong table and quietly disappears from every dashboard
     # panel that reads `samples`.
@@ -503,7 +503,7 @@ def stdin_lines():
 
 
 def simulate_lines(hz, rig):
-    """Emit fake data in the SAME human-readable format as hathaway.ino, in
+    """Emit fake data in the SAME human-readable format as RX-105-Xi/RX-105-Xi.ino, in
     real time. Exercises the real parser; no second process / pipe needed."""
     import random
     t0 = time.monotonic()
@@ -662,7 +662,7 @@ def main():
                    default="serial")
     p.add_argument("--port", help="serial port, e.g. COM3 (Windows) or /dev/ttyACM0")
     p.add_argument("--baud", type=int, default=115200,
-                   help="115200 for the real hathaway.ino")
+                   help="115200 for the real RX-105-Xi/RX-105-Xi.ino")
     p.add_argument("--format", choices=["hathaway", "csv"], default="hathaway",
                    help="hathaway = real firmware's human-readable prints; "
                         "csv = the seq,t_us,kind,type,channel,value protocol")

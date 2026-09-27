@@ -2,7 +2,7 @@
 //
 // These tests protect both the old command forms and action commands with one
 // numeric argument. Keep them small: the parser is pure and should stay boring.
-#include "../protocol.h"
+#include "../RX-105-Xi/protocol.h"
 
 #include <cmath>
 #include <cstdio>

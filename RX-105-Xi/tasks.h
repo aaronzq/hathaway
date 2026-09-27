@@ -10,7 +10,7 @@
 // tools/task_test.cpp drive these classes on a PC.
 //
 // Tunable numbers are the mutable globals defined in behavior_task.h and
-// registered in CMD_TABLE (hathaway.ino), so they are settable live over serial
+// registered in CMD_TABLE (RX-105-Xi.ino), so they are settable live over serial
 // with "SET <NAME> <VALUE>". tasks.cpp declares the ones it reads as extern
 // rather than including behavior_task.h -- that header *defines* the globals,
 // so a second translation unit including it would fail to link. Same reason

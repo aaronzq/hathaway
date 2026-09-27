@@ -53,7 +53,7 @@ Once plugged in, note its **COM port** (Tools → Port, or Device Manager → Po
 | `FastAccelStepper` | the rail stepper motor |
 
 **TFT_eSPI needs its pins configured before it will compile/work.** This project
-uses `TFT_DC=14, TFT_CS=15, TFT_BL=16` (see `behavior_board.h`), which must be
+uses `TFT_DC=14, TFT_CS=15, TFT_BL=16` (see `RX-105-Xi/behavior_board.h`), which must be
 set in the library's `User_Setup.h` (in
 `Documents\Arduino\libraries\TFT_eSPI\User_Setup.h`). Copy the `User_Setup.h`
 already used on a working rig PC rather than redoing this from scratch — I
@@ -61,7 +61,7 @@ don't have the rest of the display wiring (MOSI/SCLK/RST/driver) written down
 anywhere in this repo to reconstruct it from.
 
 ### 1.5 Flash it
-Open `hathaway.ino`, select the COM port (**Tools → Port**), click **Upload**.
+Open `RX-105-Xi/RX-105-Xi.ino`, select the COM port (**Tools → Port**), click **Upload**.
 
 > **After upload, press the board's physical reset button once.** This is a
 > known ESP32-S3 quirk — code doesn't start running until you do.

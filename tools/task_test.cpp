@@ -10,8 +10,8 @@
 // Add a case whenever you add or change a task. A failing trace here is a bug
 // you found in a second instead of at the rig.
 // ---------------------------------------------------------------------------
-#include "../task.h"
-#include "../tasks.h"
+#include "../RX-105-Xi/task.h"
+#include "../RX-105-Xi/tasks.h"
 
 #include <cstdio>
 #include <string>

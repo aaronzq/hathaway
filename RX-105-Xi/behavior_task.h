@@ -38,9 +38,9 @@ const float SPEED  = 160.0f; // drift speed, px/s
 const unsigned int FREQS[] = {3000, 6000, 9000, 12000};
 const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
 
-// Runtime-tunable over serial via "SET <NAME> <VALUE>" (see hathaway.ino).
+// Runtime-tunable over serial via "SET <NAME> <VALUE>" (see RX-105-Xi.ino).
 // Mutable (not const) so the command handler can update them live. This header
-// is included only by hathaway.ino, so single-definition is fine.
+// is included only by RX-105-Xi.ino, so single-definition is fine.
 unsigned long REWARD_DURATION1 = 63;    // spout 1 solenoid open time, ms
 unsigned long REWARD_DURATION2 = 55;    // spout 2 solenoid open time, ms
 unsigned long REWARD_INTERVAL1 = 3000;  // refractory after a spout-1 reward, ms

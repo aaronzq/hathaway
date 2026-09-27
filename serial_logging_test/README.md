@@ -19,7 +19,7 @@ serial_logging_test/
 
 ## What the ingest reads
 
-By default (`--format hathaway`) the ingest parses the **real `hathaway.ino`
+By default (`--format hathaway`) the ingest parses the **real `RX-105-Xi/RX-105-Xi.ino`
 serial output** directly — the human-readable lines the firmware already prints:
 
 | Firmware line | Stored as | Shown on dashboard |
@@ -68,7 +68,7 @@ Press **Ctrl+C** to stop.
 ## Full setup on Windows 11
 
 ### 1. Flash / run the firmware
-Use your **real `hathaway.ino`** — the ingest reads its serial output directly.
+Use your **real `RX-105-Xi/RX-105-Xi.ino`** — the ingest reads its serial output directly.
 Flash it as usual, and note the **COM port** (Tools → Port, or Device Manager →
 Ports, e.g. `COM3`). The firmware runs at **115200 baud**.
 

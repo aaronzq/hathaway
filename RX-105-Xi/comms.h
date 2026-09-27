@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 // comms.h -- the communication facility.
 //
-// Owns the dual-core split described in comms_architecture_plan.md:
+// Owns the dual-core split described in docs/comms_architecture_plan.md:
 //   core 0 (comms task)  owns Serial: formats and writes telemetry, reads and
 //                        validates inbound command lines.
 //   core 1 (loop)        runs the task. Never touches Serial. Enqueues

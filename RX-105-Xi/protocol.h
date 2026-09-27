@@ -10,14 +10,14 @@
 //
 // This header defines *how* messages are described and rendered. It knows
 // nothing about gratings, spouts, scales or magnets. Rig-specific content lives
-// in the two tables at the top of hathaway.ino; the engine that pumps them
+// in the two tables at the top of RX-105-Xi.ino; the engine that pumps them
 // lives in comms.h/comms.cpp.
 //
 // Nothing here touches FreeRTOS or Serial, so the whole formatting path can be
 // compiled and unit-tested on a host machine (see tools/golden_test.cpp).
 //
 // You should rarely need to edit this file. To add a message or a command, add
-// a row to TELEM_TABLE or CMD_TABLE in hathaway.ino.
+// a row to TELEM_TABLE or CMD_TABLE in RX-105-Xi.ino.
 // ---------------------------------------------------------------------------
 
 
@@ -39,7 +39,7 @@
 // One telemetry event, enqueued by the control core and rendered on the comms
 // core. Fixed size so it can travel through a FreeRTOS queue by value.
 struct TelemRec {
-  uint8_t  type;      // a TELEM_* id from hathaway.ino, or a TELEM_INTERNAL_*
+  uint8_t  type;      // a TELEM_* id from RX-105-Xi.ino, or a TELEM_INTERNAL_*
   uint8_t  channel;   // 1-based; command/table slot for internal messages
   float    value;     // weight, 0/1 state, count...
   uint32_t dev_ms;    // millis() captured at the moment of the event

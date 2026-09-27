@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 g++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -I. -Ishim \
-    -o task_test task_test.cpp ../task.cpp ../tasks.cpp
+    -o task_test task_test.cpp ../RX-105-Xi/task.cpp ../RX-105-Xi/tasks.cpp
 
 ./task_test
 

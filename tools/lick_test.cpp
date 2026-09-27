@@ -1,4 +1,4 @@
-#include "../lick.h"
+#include "../RX-105-Xi/lick.h"
 
 #include <cstdio>
 #include <string>
