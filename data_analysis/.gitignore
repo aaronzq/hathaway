@@ -1,0 +1,11 @@
+*.jpg
+*.jpeg
+*.png
+*.svg
+*.json
+
+# Keep only reference Markdown and instructions.
+*.md
+!**/references/**/*.md
+!AGENTS.md
+!SKILL.md

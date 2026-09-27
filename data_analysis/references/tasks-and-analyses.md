@@ -106,15 +106,23 @@ Standard analyses:
 
 ## Task 3: `DISCRIMINATION`
 
-Classify trials as with magnet (`1`) or without magnet (`0`) using the
-MAGNET sample value in effect at entry to `GOCUE` (STATE channel 4).
-Use the latest valid MAGNET sample at or before that entry in `(t_us, seq)`
-order, within the same session and rig; samples hold until changed. Do not
-substitute magnet state at sample entry, reward, or any other trial time.
+Use the report column name **Head fixing**. A request for "trials with head
+fixing" means filter for `Head fixing = 1`: MAGNET stays 1 continuously from
+sample exit (first DELAY entry, STATE channel 3) through GOCUE entry (channel 4).
+"Without head fixing" means `0`; N/A and Unknown are neither group.
+Include the entire elapsed interval: every replay of DELAY and every
+EARLY_PAUSE caused by early licking. Any observed MAGNET=0 during this
+interval makes the indicator `0`, even if it returns to 1 before the go cue.
+Use the held MAGNET value at sample exit plus every update through go-cue
+entry, in `(t_us, seq)` order within the same session and rig. Include the
+held values at both boundaries; updates later in sequence than GOCUE at the
+same timestamp are outside the interval. Only assign `1` with known initial
+value 1 and uninterrupted coverage; unresolved gaps or unknown values without
+an observed 0 give `Unknown`.
 Show this binary indicator in every trial-table row instead of magnet
 duration/grace settings or hold histories. Keep raw settings in saved data.
 A complete trial that never enters GOCUE is `N/A`, not `0`. Missing go-cue
-coverage in a recording fragment, or no preceding valid MAGNET sample, is
+coverage or sample-exit coverage in a recording fragment is
 `Unknown`. Keep these rows separate from the two classified groups.
 
 Include a `Sample` column: `1` for SAMPLE1 entry, `2` for SAMPLE2 entry;

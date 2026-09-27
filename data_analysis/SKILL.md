@@ -18,6 +18,10 @@ time zone, and assumptions needed to reproduce the analysis.
 
 ## Required references
 
+Whenever a plot or figure is requested, first read
+[references/figure-making.md](references/figure-making.md). Apply its raster
+rules to raster plots; do not impose raster-specific styling on other figures.
+
 Read the reference that matches the work before writing a query or analysis:
 
 - Database connection, tables, time fields, and a Python example:
