@@ -1,5 +1,6 @@
-"""Run: python plot_stacked_raster.py (requires matplotlib).
-Session 79; saved JSON inputs; seed set by SEED below; sample-aligned 0–6 seconds.
+"""Run: python plot_stacked_raster.py (requires matplotlib and psycopg2-binary).
+Prepares local session-79 inputs automatically; refresh: python prepare_data.py --refresh.
+Seed set by SEED below; sample-aligned 0–6 seconds.
 Outputs PNG, editable SVG, and selected-trial manifest beside this script.
 """
 import json
@@ -14,14 +15,14 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon, Rectangle
 from matplotlib.lines import Line2D
 from plot_sample_aligned import COLORS, CLASS_COLORS
+from prepare_data import load_data
 
 ROOT=Path(__file__).resolve().parent
 SEED=122000
 
 
 def main():
-    trials=json.loads((ROOT/'session_79_trials.json').read_text())
-    data=json.loads((ROOT/'session_79_snapshot.json').read_text())
+    trials,data=load_data()
     records=sorted(data['records'],key=lambda r:(r['t_us'],r['seq']))
     keys=[(r['t_us'],r['seq']) for r in records]
     groups=[]

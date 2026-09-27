@@ -1,5 +1,6 @@
-"""Run python plot_sample_aligned.py; requires matplotlib.
-Uses saved session-79 trial/event JSON. Generates eight separate 10-trial PNGs
+"""Run python plot_sample_aligned.py; requires matplotlib and psycopg2-binary.
+Prepares local session-79 inputs automatically; refresh: python prepare_data.py --refresh.
+Generates eight separate 10-trial PNGs
 and a selection manifest. Approved styling is documented in references/figure-making.md.
 """
 import json
@@ -13,6 +14,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon, Rectangle
 from matplotlib.lines import Line2D
+from prepare_data import load_data
 
 ROOT=Path(__file__).resolve().parent
 SEED=79
@@ -21,8 +23,7 @@ CLASS_COLORS={'HIT':'#D5EDF8','INCORRECT':'#F6D9D9','EARLY':'#B0A6BA'}
 
 
 def main():
-    trials=json.loads((ROOT/'session_79_trials.json').read_text())
-    data=json.loads((ROOT/'session_79_snapshot.json').read_text())
+    trials,data=load_data()
     records=sorted(data['records'],key=lambda r:(r['t_us'],r['seq']))
     keys=[(r['t_us'],r['seq']) for r in records]
     manifest=[]

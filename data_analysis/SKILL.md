@@ -16,11 +16,28 @@ results in that subfolder. Include the dependencies and exact run command so
 the user can reproduce the results independently. Record the data selection,
 time zone, and assumptions needed to reproduce the analysis.
 
+Each task must work independently of every other analysis task folder. Include
+task-local code that retrieves its own data from PostgreSQL and reconstructs
+any derived tables it needs. Saved inputs may be reused within that task, but
+missing inputs must be obtainable from the database, with a documented refresh
+command. Do not import scripts or read results from another task folder.
+
+This skill and `references/` are the reusable analysis instructions. They must
+explain acquisition, interpretation, and validation without assuming any prior
+task scripts or results exist. Never link to or refer readers to analysis task
+folders from these instructions. Keep session-specific examples and assumptions
+inside their task; keep general algorithms and definitions here or in references.
+
 ## Required references
 
 Whenever a plot or figure is requested, first read
-[references/figure-making.md](references/figure-making.md). Apply its raster
-rules to raster plots; do not impose raster-specific styling on other figures.
+[references/figure-making.md](references/figure-making.md) for shared colors
+and symbol shapes. Only when the request explicitly includes "raster plot"
+(case-insensitive, including "lick raster plot" or "raster plots"), or continues
+an already requested raster plot, also read
+[references/raster-plot.md](references/raster-plot.md) for alignment, sizes,
+physical proportions, panel layout, and outputs. Generic scatter plots and
+other figures do not activate the raster layout rules.
 
 Read the reference that matches the work before writing a query or analysis:
 

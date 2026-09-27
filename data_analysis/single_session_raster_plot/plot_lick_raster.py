@@ -1,7 +1,8 @@
 """Session 79: eight sample/outcome/early-lick groups, 30 random trials each.
-Install: python -m pip install matplotlib
+Install: python -m pip install matplotlib psycopg2-binary
 Run from this folder: python plot_lick_raster.py
-Uses session_79_trials.json and session_79_snapshot.json; no database writes.
+Prepares local session inputs automatically; no database writes.
+Refresh inputs: python prepare_data.py --refresh
 """
 from bisect import bisect_left, bisect_right
 from collections import Counter
@@ -15,6 +16,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from prepare_data import load_data
 
 ROOT=Path(__file__).resolve().parent
 SEED=79
@@ -24,8 +26,7 @@ ROW_PITCH_PT=1.2*FIRST_LICK_DIAMETER_PT
 
 
 def main(sample_id, outcome, stem, early_lick=0):
-    trials=json.loads((ROOT/'session_79_trials.json').read_text(encoding='utf-8'))
-    data=json.loads((ROOT/'session_79_snapshot.json').read_text(encoding='utf-8'))
+    trials,data=load_data()
     records=sorted(data['records'],key=lambda r:(r['t_us'],r['seq']))
     keys=[(r['t_us'],r['seq']) for r in records]
     eligible=[]

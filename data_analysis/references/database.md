@@ -62,6 +62,45 @@ Use SQL parameters such as `%s`; never insert user values into SQL strings.
 Analysis scripts issue `SELECT` statements unless mutation is explicitly
 requested.
 
+## Reproducible task inputs
+
+Each analysis task owns its acquisition code and saved inputs. It must be able
+to start with no cached files and retrieve everything it needs from PostgreSQL.
+Do not read or import another task's results or scripts. Cache only within the
+current task, provide an explicit refresh command, and record the dependencies
+and exact commands in its scripts. Test acquisition from an empty cache and
+repeat execution using the task's own cache.
+
+For a trial-level snapshot, use a read-only, repeatable-read transaction
+(`connection.set_session(readonly=True, isolation_level='REPEATABLE READ')`)
+so the following queries see the same database state:
+
+1. Retrieve session metadata and verify the requested session and rig.
+2. Inspect counts by table, type, and channel before selecting needed signals.
+3. Retrieve STATE, OUTCOME, LICK, and PARAM_* events, plus active TASK samples.
+   Retrieve MAGNET and T3_PROB1 samples when head fixing or effective task-3
+   selection probability is needed. Include other signals required by the task.
+4. Audit the full session's events and samples for sequence coverage, duplicate
+   sequence numbers, zero device times, device-time range, and rig identities.
+   Sequence gaps in a filtered signal subset alone do not establish data loss.
+5. Save the raw selected records, counts, quality checks, session metadata,
+   retrieval time in UTC, and query scope. Keep device timestamps and sequence
+   numbers intact; preserve held values needed at interval boundaries when
+   limiting the query to part of a session.
+
+Rebuild derived trial tables from that snapshot using
+[tasks-and-analyses.md](tasks-and-analyses.md) and [telemetry.md](telemetry.md).
+Record the active-task evidence; if TASK observations are absent, obtain and
+record explicit user identification rather than assuming a task from old work.
+Save full parameter information and excluded fragments with reasons. Apply
+analysis-specific filters afterward, retaining original row numbers and
+firmware counters when renumbering the retained trials chronologically.
+
+Keep cached inputs and derived tables consistent: after refreshing raw data,
+rebuild dependent tables before plotting. Record time zone, filters, assumptions,
+and exclusions so a later agent can reproduce the analysis from these definitions
+without any previous analysis files.
+
 ## Tables and views
 
 ### `sessions`
