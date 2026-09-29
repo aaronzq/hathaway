@@ -1,4 +1,4 @@
-"""Run: python analyze.py; refresh database snapshot: python analyze.py --refresh.
+"""Run: python analysis.py; refresh database snapshot: python analysis.py --refresh.
 Dependencies: python -m pip install psycopg2-binary tzdata
 Reads PostgreSQL only. Default reruns use the saved snapshot for reproducibility.
 """
@@ -12,17 +12,19 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parent
 PACIFIC = ZoneInfo('America/Los_Angeles')
 START = datetime(2026, 9, 10, tzinfo=PACIFIC)
+END = datetime.fromisoformat('2026-09-25T17:17:05.793739+00:00')
+MIN_DURATION_HOURS = 2
+DSN = os.environ.get('HATHAWAY_DSN',
+    'host=localhost port=5432 dbname=hathaway user=hathaway password=hathaway')
 
 
 def fetch():
     import psycopg2
     from psycopg2.extras import RealDictCursor
-    connection = psycopg2.connect(os.environ.get('HATHAWAY_DSN',
-        'host=localhost port=5432 dbname=hathaway user=hathaway password=hathaway'),
-        connect_timeout=10)
+    connection = psycopg2.connect(DSN, connect_timeout=10)
     connection.set_session(readonly=True, isolation_level='REPEATABLE READ')
     with connection, connection.cursor(cursor_factory=RealDictCursor) as cursor:
-        cursor.execute('SELECT CURRENT_TIMESTAMP AS cutoff')
+        cursor.execute('SELECT %s::timestamptz AS cutoff', (END,))
         cutoff = cursor.fetchone()['cutoff']
         # Same scope as the original list: sessions with command-related records.
         cursor.execute("""SELECT s.* FROM sessions s WHERE EXISTS (
@@ -64,7 +66,7 @@ def fetch():
             (ids,cutoff,ids,cutoff))
         counts = cursor.fetchall()
     connection.close()
-    return dict(cutoff=cutoff, start=START, sessions=sessions, records=records,
+    return dict(cutoff=cutoff, start=START, fetched_at=datetime.now(timezone.utc), sessions=sessions, records=records,
                 tasks=tasks,quality=quality,counts=counts)
 
 
@@ -91,12 +93,12 @@ def report(data):
     for session in data['sessions']:
         sid = session['session_id']
         assert quality[sid]['rigs'] == [session['rig_id']], 'Rig ownership mismatch'
-        endpoint = session['ended_at'] or quality[sid]['last_record']
+        endpoint = min(dt(session['ended_at']), dt(data['cutoff'])) if session['ended_at'] else quality[sid]['last_record']
         seconds = (dt(endpoint)-dt(session['started_at'])).total_seconds()
-        (kept if seconds >= 7200 else excluded).append((session,endpoint,seconds))
+        (kept if seconds >= MIN_DURATION_HOURS * 3600 else excluded).append((session,endpoint,seconds))
     lines = ['# Session parameter history', '',
         f"Snapshot captured: {stamp(data['cutoff'])} Pacific time.",
-        'Scope: sessions in the command-related list from September 10, 2026 onward; keep durations of at least two hours.',
+        f'Scope: sessions with command-related records from {stamp(data["start"])} through {stamp(data["cutoff"])}; keep durations of at least {MIN_DURATION_HOURS:g} hours.',
         'All displayed times are Pacific (America/Los_Angeles). Durations are elapsed session spans, not time actively training.',
         'For sessions without an end time, the last recorded row gives a minimum duration; it does not prove the session is still running.', '',
         '| Session | Rig | Start | End / last record | Duration | Active task IDs | Note |',
@@ -153,9 +155,19 @@ def report(data):
     lines += ['', '## Reproduce', '',
         'From this folder, run:', '', '```powershell',
         'python -m pip install psycopg2-binary tzdata',
-        'python analyze.py', '```', '',
-        'The default uses snapshot.json and rewrites report.md. To query the current database and replace the snapshot and report, run `python analyze.py --refresh`.',
+        'python analysis.py', '```', '',
+        'The default uses snapshot.json and rewrites report.md. To query the database and replace the snapshot and report, run `python analysis.py --refresh`.',
         'Database refresh requires the local PostgreSQL service. Optional connection override: HATHAWAY_DSN environment variable.', '']
+    lines += ['## Pipeline and delivered files', '',
+        '1. Open a read-only, repeatable-read PostgreSQL transaction. Select sessions with PARAM_*, MAG_CMD, or RAIL_CMD events whose host arrival time is within START and END.',
+        '2. Save snapshot.json: start/cutoff scope, sessions, command-related records, active TASK samples, counts by table/type/channel, and full-session quality summaries through the cutoff. Records retain session, rig, device time, arrival time, sequence, type, channel, and value.',
+        '3. Check rig ownership and compute elapsed duration from session opening to its end (capped at END), or last recorded row if unclosed. Apply MIN_DURATION_HOURS, inclusive.',
+        '4. In recorded host-time/sequence order, retain the first parameter confirmation and compare later confirmations with the preceding value. Suppress unchanged confirmations only in this report; preserve every record in the snapshot.',
+        '5. Compare the initial settings with the preceding retained session for the same rig, then generate the tables and quality checks above. No trial reconstruction, rate calculation, or figures are part of this task.', '',
+        'Tunable settings near the top of analysis.py: START, END, MIN_DURATION_HOURS, PACIFIC, and DSN. A changed acquisition interval automatically refreshes the snapshot; changing only the duration threshold reuses it.',
+        'Times in the parameter tables are approximate host arrival times, not device capture times. No physical parameter-use timing or outbound command history is inferred.',
+        'Deliverables: analysis.py (complete pipeline), snapshot.json (intermediate database dataset), report.md (pipeline and results).',
+        f'Retrieval timestamp: {data.get("fetched_at", data["cutoff"])}. Query cutoff: {data["cutoff"]}.', '']
     return '\n'.join(lines)
 
 
@@ -164,7 +176,8 @@ if __name__ == '__main__':
     parser.add_argument('--refresh',action='store_true')
     args=parser.parse_args()
     path=ROOT/'snapshot.json'
-    if args.refresh or not path.exists():
+    cached=json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
+    if args.refresh or cached is None or dt(cached['start']) != START or dt(cached['cutoff']) != END:
         data=fetch()
         path.write_text(json.dumps(data,default=str,indent=2),encoding='utf-8')
     data=json.loads(path.read_text(encoding='utf-8'))

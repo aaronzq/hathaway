@@ -52,3 +52,9 @@ saved data or code from a different analysis task. Fetch missing inputs from
 PostgreSQL read-only; allow explicit refresh of the task's own cached inputs.
 Document dependencies and commands in the task's scripts. Verify a clean run
 without cached inputs and reuse of the task's own snapshot.
+
+Generate all current figures through the task's `analysis.py`; expose plotting
+and analysis controls there even when rendering uses helper modules. Deliver
+the saved database inputs and `report.md` with the pipeline, figure definitions,
+settings, output inventory, and reproduction commands. Keep the report current
+when changing a figure or its selection.

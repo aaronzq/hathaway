@@ -71,6 +71,12 @@ current task, provide an explicit refresh command, and record the dependencies
 and exact commands in its scripts. Test acquisition from an empty cache and
 repeat execution using the task's own cache.
 
+Use `analysis.py` as the task's single user entry point, with all tunable
+settings defined there and passed to any task-local helpers. Deliver the saved
+database snapshot and a `report.md` describing its fields, acquisition scope,
+pipeline, settings, results, and run/refresh commands, as required by `SKILL.md`.
+Check that a reused snapshot covers the requested acquisition settings.
+
 For a trial-level snapshot, use a read-only, repeatable-read transaction
 (`connection.set_session(readonly=True, isolation_level='REPEATABLE READ')`)
 so the following queries see the same database state:

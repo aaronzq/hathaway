@@ -3,7 +3,8 @@
 *.png
 *.svg
 *.json
-
+*.csv
+*.gz
 # Keep only reference Markdown and instructions.
 *.md
 !**/references/**/*.md

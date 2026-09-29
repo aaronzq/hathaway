@@ -1,8 +1,7 @@
 """Prepare this task's session-79 inputs directly from PostgreSQL (read-only).
 Install: python -m pip install psycopg2-binary matplotlib
-Run: python prepare_data.py [--refresh], then python plot_sample_aligned.py
-Other plots: python plot_lick_raster.py; python plot_stacked_raster.py
-Each plot prepares its own inputs automatically. A saved local snapshot is reused;
+Run the complete task: python analysis.py [--refresh].
+A saved local snapshot is reused;
 --refresh replaces it from the database and rebuilds the trial table.
 
 Selection: complete recording boundaries in session 79, rig 1, task 3.
@@ -20,32 +19,36 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+SESSION_ID = 79
+RIG_ID = 1
+USER_CONFIRMED_TASK3_SESSIONS = (79,)
+DSN = os.environ.get('HATHAWAY_DSN',
+    'host=localhost port=5432 dbname=hathaway user=hathaway password=hathaway')
 OUTCOMES = {0:'HIT',1:'INCORRECT',2:'NO_RESPONSE',3:'ABORT',4:'TEACH'}
 
 
 def fetch():
     import psycopg2
     from psycopg2.extras import RealDictCursor
-    with psycopg2.connect(os.environ.get('HATHAWAY_DSN',
-            'host=localhost port=5432 dbname=hathaway user=hathaway password=hathaway')) as con:
+    with psycopg2.connect(DSN) as con:
         con.set_session(readonly=True, isolation_level='REPEATABLE READ')
         with con.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute('SELECT * FROM sessions WHERE session_id=%s',(79,))
+            cur.execute('SELECT * FROM sessions WHERE session_id=%s',(SESSION_ID,))
             session = cur.fetchone()
             cur.execute('''SELECT session_id,rig_id,seq,t_us,host_ts,type,channel,value
                 FROM events_dev WHERE session_id=%s AND
                 (type IN ('STATE','OUTCOME','LICK') OR starts_with(type,'PARAM_'))
-                ORDER BY t_us,seq''',(79,))
+                ORDER BY t_us,seq''',(SESSION_ID,))
             records = cur.fetchall()
-            cur.execute("SELECT * FROM samples_dev WHERE session_id=%s AND type='TASK' ORDER BY t_us,seq",(79,))
+            cur.execute("SELECT * FROM samples_dev WHERE session_id=%s AND type='TASK' ORDER BY t_us,seq",(SESSION_ID,))
             tasks = cur.fetchall()
-            cur.execute("SELECT seq,t_us,type,channel,value FROM samples_dev WHERE session_id=%s AND type IN ('MAGNET','T3_PROB1') ORDER BY t_us,seq",(79,))
+            cur.execute("SELECT seq,t_us,type,channel,value FROM samples_dev WHERE session_id=%s AND type IN ('MAGNET','T3_PROB1') ORDER BY t_us,seq",(SESSION_ID,))
             usage_samples = cur.fetchall()
             cur.execute('''WITH r AS (
                 SELECT rig_id,seq,t_us,type,channel,'events' AS source FROM events WHERE session_id=%s
                 UNION ALL SELECT rig_id,seq,t_us,type,channel,'samples' FROM samples WHERE session_id=%s)
                 SELECT source,type,channel,count(*) AS rows FROM r
-                GROUP BY source,type,channel ORDER BY source,type,channel''',(79,79))
+                GROUP BY source,type,channel ORDER BY source,type,channel''',(SESSION_ID,SESSION_ID))
             counts = cur.fetchall()
             cur.execute('''WITH r AS (
                 SELECT rig_id,seq,t_us FROM events WHERE session_id=%s
@@ -54,14 +57,17 @@ def fetch():
                 min(seq) AS min_seq,max(seq) AS max_seq,
                 count(*) FILTER (WHERE t_us=0) AS zero_device_times,
                 min(t_us) FILTER (WHERE t_us>0) AS first_device_us,max(t_us) AS last_device_us,
-                array_agg(DISTINCT rig_id) AS rigs FROM r''',(79,79))
+                array_agg(DISTINCT rig_id) AS rigs FROM r''',(SESSION_ID,SESSION_ID))
             quality = cur.fetchone()
     return dict(session=session, records=records, tasks=tasks, usage_samples=usage_samples, counts=counts,
                 quality=quality, fetched_at=datetime.now(timezone.utc).isoformat())
 
 
 def reconstruct(data):
-    assert data['session']['rig_id']==1 and data['quality']['rigs']==[1]
+    assert data['session']['session_id']==SESSION_ID
+    assert data['session']['rig_id']==RIG_ID and data['quality']['rigs']==[RIG_ID]
+    if not data['tasks'] and SESSION_ID not in USER_CONFIRMED_TASK3_SESSIONS:
+        raise ValueError('Missing TASK telemetry: explicit user task-3 identification required')
     assert all(int(t['value'])==3 for t in data['tasks']), 'Task observations conflict with task 3'
     records = [r for r in data['records'] if r['t_us']>0]
     params, trials, changes = {}, [], []
@@ -88,12 +94,12 @@ def reconstruct(data):
                     trials.append(pending)
                 pending=dict(trial_id=None,start_us=r['t_us'],start_seq=r['seq'],
                     start_counter=int(value),trial_type=channel,correct_spout=channel,
-                    task=3,session_id=79,rig_id=1,parameters_at_start=params.copy(),
+                    task=3,session_id=SESSION_ID,rig_id=RIG_ID,parameters_at_start=params.copy(),
                     end_us=None,end_seq=None,outcome=None,during_trial_changes=[],status='missing_end')
             elif channel==8:
                 if pending is None:
                     pending=dict(trial_id=None,start_us=None,start_seq=None,start_counter=None,
-                        trial_type=None,correct_spout=None,task=3,session_id=79,rig_id=1,
+                        trial_type=None,correct_spout=None,task=3,session_id=SESSION_ID,rig_id=RIG_ID,
                         parameters_at_start=None,end_us=None,end_seq=None,outcome=None,
                         during_trial_changes=[],status='missing_start')
                 else:
@@ -265,9 +271,15 @@ def classify_early_lick(data,trials):
         previous_end=end
 
 
-def load_data(refresh=False):
+def load_data(refresh=False, *, session_id=79, rig_id=1,
+              user_confirmed_task3_sessions=(79,), dsn=None):
+    global SESSION_ID, RIG_ID, USER_CONFIRMED_TASK3_SESSIONS, DSN
+    SESSION_ID, RIG_ID = session_id, rig_id
+    USER_CONFIRMED_TASK3_SESSIONS = user_confirmed_task3_sessions
+    if dsn is not None:
+        DSN = dsn
     """Fetch a missing snapshot and rebuild this folder's derived trial table."""
-    path = ROOT / 'session_79_snapshot.json'
+    path = ROOT / f'session_{SESSION_ID}_snapshot.json'
     if refresh or not path.exists():
         data = json.loads(json.dumps(fetch(), default=str))
     else:
@@ -290,8 +302,8 @@ def load_data(refresh=False):
         previous_params = current
     quality = data['quality']
     audit = dict(
-        session_id=79, rig_id=1, task=3,
-        task_basis='TASK telemetry' if data['tasks'] else 'Original user identification of session 79 as task 3',
+        session_id=SESSION_ID, rig_id=RIG_ID, task=3,
+        task_basis='TASK telemetry' if data['tasks'] else f'User identification of session {SESSION_ID} as task 3',
         time_basis='Device t_us and seq; elapsed seconds for plots; fetched_at in UTC',
         fetched_at=data['fetched_at'], quality=quality, counts=data['counts'],
         sequence_gaps=quality['max_seq']-quality['min_seq']+1-quality['distinct_seq'],
@@ -303,8 +315,8 @@ def load_data(refresh=False):
     # Validate reconstruction before replacing a previously usable snapshot.
     if refresh or not path.exists():
         path.write_text(json.dumps(data, indent=2), encoding='utf-8')
-    (ROOT / 'session_79_trials.json').write_text(json.dumps(trials, indent=2), encoding='utf-8')
-    (ROOT / 'session_79_preparation.json').write_text(json.dumps(audit, indent=2), encoding='utf-8')
+    (ROOT / f'session_{SESSION_ID}_trials.json').write_text(json.dumps(trials, indent=2), encoding='utf-8')
+    (ROOT / f'session_{SESSION_ID}_preparation.json').write_text(json.dumps(audit, indent=2), encoding='utf-8')
     return trials, data
 
 

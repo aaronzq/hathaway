@@ -16,6 +16,38 @@ results in that subfolder. Include the dependencies and exact run command so
 the user can reproduce the results independently. Record the data selection,
 time zone, and assumptions needed to reproduce the analysis.
 
+## Required deliverables for every task
+
+Each analysis subfolder is a separate task. Always deliver all three:
+
+1. **Intermediate dataset:** save the database records actually collected and
+   used, plus the metadata needed to interpret them. Preserve timestamps,
+   sequence numbers, session/rig identity, query scope, retrieval time, counts,
+   and quality checks. Name the dataset files and explain their structure in
+   `report.md`. Derived tables alone do not replace the database snapshot.
+2. **`report.md`:** explain the full pipeline from database acquisition through
+   reconstruction, exclusions, filtering, calculations, and every result or
+   figure. Include the selection, time zone, assumptions, definitions and
+   denominators, tunable settings, dependencies, exact run/refresh commands,
+   output-file inventory, validation, and limitations. Update it when the
+   analysis changes; a script docstring is not a substitute.
+3. **`analysis.py`:** provide this exact entry-point filename. One command must
+   obtain missing intermediate data, rebuild derived data, and generate the
+   report and all current results, including figures. Support an explicit
+   refresh from the read-only database and reuse of this task's saved inputs.
+   Put every user-facing tunable (sessions, time limits, rolling-window length,
+   selection counts, random seed, plot options, and connection settings as
+   applicable) together near the top of `analysis.py`. Task-local helpers are
+   allowed, but the entry point must pass these settings to them; the user
+   must not need to edit a helper or another configuration file.
+
+Check cached inputs against the acquisition settings before reuse. When a
+setting needs data outside the saved query scope, retrieve a matching dataset
+or clearly request `--refresh`; never silently use a stale selection. Rebuild
+all dependent outputs after input or setting changes. Verify both acquisition
+without saved inputs and rerunning with saved inputs. Deliver links to the
+dataset, `report.md`, and `analysis.py`, as well as requested results.
+
 Each task must work independently of every other analysis task folder. Include
 task-local code that retrieves its own data from PostgreSQL and reconstructs
 any derived tables it needs. Saved inputs may be reused within that task, but

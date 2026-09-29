@@ -1,6 +1,6 @@
 """Session 79 task-3 trial reconstruction.
 Install: python -m pip install psycopg2-binary tzdata
-Run: python analyze_session.py [--refresh]
+Run: python analysis.py [--refresh]
 Default reuses session_79_snapshot.json; --refresh reads the database.
 """
 import argparse
@@ -12,6 +12,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
+SESSION_ID = 79
+RIG_ID = 1
+USER_CONFIRMED_TASK3_SESSIONS = (79,)
+DSN = os.environ.get('HATHAWAY_DSN',
+    'host=localhost port=5432 dbname=hathaway user=hathaway password=hathaway')
 TZ = ZoneInfo('America/Los_Angeles')
 OUTCOMES = {0:'HIT',1:'INCORRECT',2:'NO_RESPONSE',3:'ABORT',4:'TEACH'}
 
@@ -19,26 +24,25 @@ OUTCOMES = {0:'HIT',1:'INCORRECT',2:'NO_RESPONSE',3:'ABORT',4:'TEACH'}
 def fetch():
     import psycopg2
     from psycopg2.extras import RealDictCursor
-    with psycopg2.connect(os.environ.get('HATHAWAY_DSN',
-            'host=localhost port=5432 dbname=hathaway user=hathaway password=hathaway')) as con:
+    with psycopg2.connect(DSN) as con:
         con.set_session(readonly=True, isolation_level='REPEATABLE READ')
         with con.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute('SELECT * FROM sessions WHERE session_id=%s',(79,))
+            cur.execute('SELECT * FROM sessions WHERE session_id=%s',(SESSION_ID,))
             session = cur.fetchone()
             cur.execute('''SELECT session_id,rig_id,seq,t_us,host_ts,type,channel,value
                 FROM events_dev WHERE session_id=%s AND
                 (type IN ('STATE','OUTCOME','LICK') OR starts_with(type,'PARAM_'))
-                ORDER BY t_us,seq''',(79,))
+                ORDER BY t_us,seq''',(SESSION_ID,))
             records = cur.fetchall()
-            cur.execute("SELECT * FROM samples_dev WHERE session_id=%s AND type='TASK' ORDER BY t_us,seq",(79,))
+            cur.execute("SELECT * FROM samples_dev WHERE session_id=%s AND type='TASK' ORDER BY t_us,seq",(SESSION_ID,))
             tasks = cur.fetchall()
-            cur.execute("SELECT seq,t_us,type,channel,value FROM samples_dev WHERE session_id=%s AND type IN ('MAGNET','T3_PROB1') ORDER BY t_us,seq",(79,))
+            cur.execute("SELECT seq,t_us,type,channel,value FROM samples_dev WHERE session_id=%s AND type IN ('MAGNET','T3_PROB1') ORDER BY t_us,seq",(SESSION_ID,))
             usage_samples = cur.fetchall()
             cur.execute('''WITH r AS (
                 SELECT rig_id,seq,t_us,type,channel,'events' AS source FROM events WHERE session_id=%s
                 UNION ALL SELECT rig_id,seq,t_us,type,channel,'samples' FROM samples WHERE session_id=%s)
                 SELECT source,type,channel,count(*) AS rows FROM r
-                GROUP BY source,type,channel ORDER BY source,type,channel''',(79,79))
+                GROUP BY source,type,channel ORDER BY source,type,channel''',(SESSION_ID,SESSION_ID))
             counts = cur.fetchall()
             cur.execute('''WITH r AS (
                 SELECT rig_id,seq,t_us FROM events WHERE session_id=%s
@@ -47,7 +51,7 @@ def fetch():
                 min(seq) AS min_seq,max(seq) AS max_seq,
                 count(*) FILTER (WHERE t_us=0) AS zero_device_times,
                 min(t_us) FILTER (WHERE t_us>0) AS first_device_us,max(t_us) AS last_device_us,
-                array_agg(DISTINCT rig_id) AS rigs FROM r''',(79,79))
+                array_agg(DISTINCT rig_id) AS rigs FROM r''',(SESSION_ID,SESSION_ID))
             quality = cur.fetchone()
     return dict(session=session, records=records, tasks=tasks, usage_samples=usage_samples, counts=counts,
                 quality=quality, fetched_at=datetime.now(timezone.utc).isoformat())
@@ -58,7 +62,10 @@ def when(us):
 
 
 def reconstruct(data):
-    assert data['session']['rig_id']==1 and data['quality']['rigs']==[1]
+    assert data['session']['session_id']==SESSION_ID
+    assert data['session']['rig_id']==RIG_ID and data['quality']['rigs']==[RIG_ID]
+    if not data['tasks'] and SESSION_ID not in USER_CONFIRMED_TASK3_SESSIONS:
+        raise ValueError('Missing TASK telemetry: explicit user task-3 identification required')
     assert all(int(t['value'])==3 for t in data['tasks']), 'Task observations conflict with task 3'
     records = [r for r in data['records'] if r['t_us']>0]
     params, trials, changes = {}, [], []
@@ -85,12 +92,12 @@ def reconstruct(data):
                     trials.append(pending)
                 pending=dict(trial_id=None,start_us=r['t_us'],start_seq=r['seq'],
                     start_counter=int(value),trial_type=channel,correct_spout=channel,
-                    task=3,session_id=79,rig_id=1,parameters_at_start=params.copy(),
+                    task=3,session_id=SESSION_ID,rig_id=RIG_ID,parameters_at_start=params.copy(),
                     end_us=None,end_seq=None,outcome=None,during_trial_changes=[],status='missing_end')
             elif channel==8:
                 if pending is None:
                     pending=dict(trial_id=None,start_us=None,start_seq=None,start_counter=None,
-                        trial_type=None,correct_spout=None,task=3,session_id=79,rig_id=1,
+                        trial_type=None,correct_spout=None,task=3,session_id=SESSION_ID,rig_id=RIG_ID,
                         parameters_at_start=None,end_us=None,end_seq=None,outcome=None,
                         during_trial_changes=[],status='missing_start')
                 else:
@@ -266,7 +273,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--refresh',action='store_true')
     args=parser.parse_args()
-    path=ROOT/'session_79_snapshot.json'
+    path=ROOT/f'session_{SESSION_ID}_snapshot.json'
     if args.refresh or not path.exists():
         path.write_text(json.dumps(fetch(),default=str,indent=2),encoding='utf-8')
     data=json.loads(path.read_text(encoding='utf-8'))
@@ -283,14 +290,14 @@ def main():
         current=t['parameters_at_start']
         t['parameter_changes_at_start']={k:v for k,v in current.items() if k not in previous_params or previous_params[k]!=v}
         previous_params=current
-    (ROOT/'session_79_trials.json').write_text(json.dumps(trials,indent=2),encoding='utf-8')
+    (ROOT/f'session_{SESSION_ID}_trials.json').write_text(json.dumps(trials,indent=2),encoding='utf-8')
     counts=Counter(t['status'] for t in trials)
     q=data['quality']
     gaps=q['max_seq']-q['min_seq']+1-q['distinct_seq']
-    lines=['# Session 79 trial table', '',
+    lines=[f'# Session {SESSION_ID} trial table', '',
         'Definitions are documented in references/tasks-and-analyses.md and references/telemetry.md. Trial rows are numbered chronologically; ABORT is a recorded outcome, distinct from a missing recording boundary.', '',
-        f"Rig 1; task 3 supplied by the user. Session: {data['session']['started_at']} to {data['session']['ended_at']} (stored host times). Note: {data['session']['note'] or 'none'}.",
-        f"Trial timestamps below use device time in Pacific time (UTC−07:00). Snapshot: {data['fetched_at']}.",
+        f"Rig {RIG_ID}; task 3 supplied by the user. Session: {data['session']['started_at']} to {data['session']['ended_at']} (stored host times). Note: {data['session']['note'] or 'none'}.",
+        f"Trial timestamps below use device time in {TZ.key}. Snapshot: {data['fetched_at']}.",
         f"Included {len(trials)} trials with recorded start and end times. Excluded {len(excluded)} recording fragments (unfiltered rows: {[t['trial_id'] for t in excluded]}). This filter applies only to this analysis.",
         f"TASK samples: {len(data['tasks'])}. If absent, active task identity relies on the user's session identification; PARAM_TASK alone is not proof of activation.",
         f"Quality: {q['rows']} total rows, {gaps} absent sequence numbers, {q['rows']-q['distinct_seq']} duplicate sequence rows, {q['zero_device_times']} zero device timestamps. No counter decreases detected in STATE records.",
@@ -301,10 +308,9 @@ def main():
         'Sample is 1 or 2 from SAMPLE1/SAMPLE2 entry; Unknown means the sample entry was not recorded. Early lick is 1 when a lick is recorded during DELAY (either spout), or EARLY_PAUSE supplies positive evidence; 0 means the complete trial entered DELAY without either. N/A means a complete trial never entered DELAY; Unknown means insufficient recording coverage to establish absence. State/lick ordering uses (t_us, seq).',
         'With T3_EARLY_LICK_PUNISH enabled, delay licks normally trigger EARLY_PAUSE followed by a replay of DELAY. A trial can end during the pause before replay; it still has early lick=1. Without punishment, licks can occur without replay. Licks during sample, go cue, or EARLY_PAUSE alone do not qualify.',
         'A threshold interval annotation identifies the values available for weight processing during that trial. Task-3 phase settings did not change within any trial in this session. Effective type-1 probability comes from T3_PROB1, not the configured manual probability. Serial confirmation timestamps do not directly timestamp every internal parameter read, so exact effects at a concurrent setting/read boundary cannot be proved from these records.',
-        'Full parameter snapshots, trial type, correct spout and outcomes for retained trials are in session_79_trials.json; raw selected records, including excluded fragments, and counts by type/channel are in session_79_snapshot.json.', '',
+        f'Full parameter snapshots, trial type, correct spout and outcomes for retained trials are in session_{SESSION_ID}_trials.json; raw selected records, including excluded fragments, and counts by type/channel are in session_{SESSION_ID}_snapshot.json.', '',
         '## Reproduce', '',
-        'From this folder: `python -m pip install psycopg2-binary tzdata`, then `python analyze_session.py`. Add `--refresh` to replace the snapshot from the local database. Queries are read-only. Optional connection override: HATHAWAY_DSN.',
-        'The older check_documents.py/check_view.py and their reports are historical artifacts from before removal of trial_params; they are not required for this analysis.', '',
+        'From this folder: `python -m pip install psycopg2-binary tzdata`, then `python analysis.py`. Add `--refresh` to replace the snapshot from the local database. Queries are read-only. Optional connection override: HATHAWAY_DSN.',
         '## Trials', '', '| Trial ID | Trial start | Trial end | Sample | Outcome | Head fixing | Early lick | Parameters (confirmed configuration and use) |',
         '|---|---|---|---|---|---|---|---|']
     previous_usage=None
@@ -328,7 +334,26 @@ def main():
         f"- Outcome: {dict(Counter(t['outcome'] for t in trials if t['outcome']))}.",
         f"- Head fixing: {dict(Counter(t['magnet_classification'] for t in trials))}.",
         f"- Early lick: {dict(Counter(t['early_lick_classification'] for t in trials))}."]
-    (ROOT/'session_79_trials.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+    (ROOT/f'session_{SESSION_ID}_trials.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
+    pipeline = [f'# Session {SESSION_ID} analysis', '',
+        '## Reproduce and tune', '',
+        'From this folder: `python -m pip install psycopg2-binary tzdata`, then `python analysis.py`. Use `python analysis.py --refresh` to replace the task-local database snapshot and rebuild all outputs.',
+        'Edit SESSION_ID, RIG_ID, TZ, and DSN near the top of analysis.py. This reconstruction supports task 3 only. USER_CONFIRMED_TASK3_SESSIONS lists sessions explicitly identified by the user; changing SESSION_ID does not extend that confirmation. A different session uses a different snapshot filename.', '',
+        '## Intermediate dataset and pipeline', '',
+        f'1. Collect session metadata, STATE/OUTCOME/LICK/PARAM_* events, TASK/MAGNET/T3_PROB1 samples, counts, and the full-session sequence audit in a read-only, repeatable-read transaction. Save session_{SESSION_ID}_snapshot.json with its retrieval time. The JSON keys are session, records, tasks, usage_samples, counts, quality, and fetched_at; raw records retain device timestamps and sequence numbers.',
+        '2. Validate session/rig ownership and active-task evidence. Sort by device time and sequence, ignoring zero device times for timing. Reject counter resets and unmatched outcomes.',
+        '3. Pair SAMPLE1/SAMPLE2 starts with ITI ends and following OUTCOME records, checking timestamps, sequence, and counter increments. Keep known ABORT outcomes distinct from missing recording boundaries.',
+        '4. Reconstruct confirmed parameters at trial start and supported parameter-use intervals. Classify head fixing from MAGNET held continuously from sample exit through GOCUE. Classify early licking from licks during DELAY or positive EARLY_PAUSE evidence; retain Unknown and N/A separately.',
+        '5. Save excluded recording fragments separately, keep trials with both boundaries, and number them chronologically while retaining original row numbers and firmware counters. Generate the full trial table and descriptive counts; this task does not plot figures or calculate rolling rates.', '',
+        '## Results, definitions, and validation', '']
+    detail_end = lines.index('## Reproduce')
+    pipeline += lines[2:detail_end] + lines[lines.index('## Summary'):] + ['', '## Files', '',
+        f'- `session_{SESSION_ID}_snapshot.json`: intermediate database dataset, including all collected records and audit metadata.',
+        f'- `session_{SESSION_ID}_trials.json` and `session_{SESSION_ID}_trials.md`: derived trials and readable table.',
+        f'- `session_{SESSION_ID}_excluded.json`: excluded fragments with reasons and original row numbers.',
+        '- `analysis.py`: complete executable pipeline; `report.md`: this report.', '']
+    (ROOT/f'session_{SESSION_ID}_excluded.json').write_text(json.dumps(excluded,indent=2),encoding='utf-8')
+    (ROOT/'report.md').write_text('\n'.join(pipeline),encoding='utf-8')
     print(json.dumps(dict(rows=len(trials),statuses=counts,parameter_changes=len(changes),
         mid_trial_changes=sum(len(t['during_trial_changes']) for t in trials),
         first_id=trials[0]['trial_id'],last_id=trials[-1]['trial_id']),indent=2))
