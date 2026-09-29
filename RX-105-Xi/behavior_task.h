@@ -16,6 +16,7 @@ const int RIG_ID = 1;
 const float SCALE_CALIBRATION = 636.5f; //Rig 1
 // const float SCALE_CALIBRATION = 656.19f; //Rig 2
 // const float SCALE_CALIBRATION = 606.19f; //Rig 3
+// const float SCALE_CALIBRATION = 636.5f; //Rig 4
 
 // Motor rail
 extern const uint32_t RAIL_DEFAULT_SPEED_HZ = 800u;
