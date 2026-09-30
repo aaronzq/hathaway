@@ -675,6 +675,121 @@ void DiscriminationTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) 
 }
 
 
+// Task 5: outcomes are committed at the response decision, not at ITI.
+// Departures before that decision abort; afterwards they preserve the result.
+extern unsigned long T5_SAMPLE_MS, T5_RESPONSE_MS, T5_CONSUME_MS;
+extern unsigned long T5_PUNISH_MS, T5_ITI_MS, T5_MAX_REPEAT, T5_PROB_S1;
+extern unsigned long T5_ANTI_BIAS_AUTO_ENABLE, T5_ANTI_BIAS_WIN, T5_ANTI_BIAS_ACC_THRESH;
+
+const char *VisualGoNoGoTask::stateName(uint8_t s) const {
+  static const char *names[] = {"IDLE", "SAMPLE1", "SAMPLE2", "RESPONSE", "CONSUME", "PUNISH", "ITI"};
+  return s < T5_STATE_COUNT ? names[s] : "?";
+}
+void VisualGoNoGoTask::reset(uint32_t now) {
+  Task::reset(now);
+  lastType_ = run_ = 0; type_ = 1;
+  reportProb_ = responseArmed_ = false;
+  duration_ = 0;
+  clearT5AntiBiasHistory();
+}
+void VisualGoNoGoTask::clearT5AntiBiasHistory() { head_ = count_ = 0; }
+bool VisualGoNoGoTask::takeT5Prob1(uint8_t &p) {
+  if (!reportProb_) return false;
+  p = probability_; reportProb_ = false; return true;
+}
+uint8_t VisualGoNoGoTask::effectiveProb1() const {
+  if (!T5_ANTI_BIAS_AUTO_ENABLE) return clampPercent(T5_PROB_S1);
+  unsigned long w = T5_ANTI_BIAS_WIN;
+  if (w < 1) w = 1;
+  if (w > 100) w = 100;
+  if (count_ < w) return 50;
+  uint8_t n[2] = {}, hits[2] = {};
+  unsigned idx = (head_ + 100 - w) % 100;
+  for (unsigned i=0; i<w; ++i, idx=(idx+1)%100) {
+    const Trial &h = history_[idx];
+    n[h.type-1]++;
+    if (h.outcome == OUTCOME_HIT || h.outcome == OUTCOME_CR) hits[h.type-1]++;
+  }
+  if (!n[0] || !n[1]) return 50;
+  float a = float(hits[0])/n[0], b = float(hits[1])/n[1];
+  float threshold = clampPercent(T5_ANTI_BIAS_ACC_THRESH)/100.0f;
+  if (a >= threshold && b >= threshold) return 50;
+  return clampAutoProb(int(50.0f + 50.0f*(b-a) + 0.5f));
+}
+void VisualGoNoGoTask::finish(uint8_t outcome) {
+  countTrial(outcome);
+  if (outcome == OUTCOME_ABORT) return;
+  history_[head_] = {type_, outcome};
+  head_ = (head_+1)%100;
+  if (count_ < 100) ++count_;
+}
+uint8_t VisualGoNoGoTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
+  if (s != T5_IDLE && !in.level(LV_IN_POSITION)) {
+    if (s == T5_SAMPLE1 || s == T5_SAMPLE2 || s == T5_RESPONSE) finish(OUTCOME_ABORT);
+    return T5_IDLE;
+  }
+  switch (s) {
+    case T5_IDLE:
+    case T5_ITI:
+      if (in.level(LV_IN_POSITION) && (s == T5_IDLE || in.has(EV_TIMEOUT))) {
+        probability_ = effectiveProb1();
+        type_ = task_rand32()%100u < probability_ ? 1 : 2;
+        if (type_ == lastType_ && run_ >= T5_MAX_REPEAT) type_ = type_ == 1 ? 2 : 1;
+        return type_ == 1 ? T5_SAMPLE1 : T5_SAMPLE2;
+      }
+      break;
+    case T5_SAMPLE1:
+    case T5_SAMPLE2:
+      if (in.displayOn && uint32_t(in.now - in.displayOnMs) >= duration_) return T5_RESPONSE;
+      break;
+    case T5_RESPONSE:
+      if (in.has(EV_TIMEOUT)) {
+        finish(type_ == 1 ? OUTCOME_MISS : OUTCOME_CR); return T5_ITI;
+      }
+      if (!responseArmed_) {
+        if (!in.level(LV_LICK1_CONTACT)) responseArmed_ = true;
+        return STAY;
+      }
+      if (in.has(EV_LICK1)) {
+        finish(type_ == 1 ? OUTCOME_HIT : OUTCOME_FA);
+        if (type_ == 1) { out.push(ACT_REWARD, 1); return T5_CONSUME; }
+        return T5_PUNISH;
+      }
+      break;
+    case T5_CONSUME:
+      if (in.has(EV_TIMEOUT)) return T5_ITI;
+      break;
+    case T5_PUNISH:
+      if (in.displayOn && uint32_t(in.now - in.displayOnMs) >= duration_) return T5_ITI;
+      break;
+  }
+  return STAY;
+}
+void VisualGoNoGoTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) {
+  switch (s) {
+    case T5_IDLE:
+    case T5_ITI:
+      out.push(ACT_T5_DARK);
+      if (s == T5_ITI) setTimeout(T5_ITI_MS);
+      break;
+    case T5_SAMPLE1:
+    case T5_SAMPLE2:
+      if (type_ == lastType_) { if (run_ < 255) ++run_; }
+      else { lastType_ = type_; run_ = 1; }
+      reportProb_ = true;
+      duration_ = T5_SAMPLE_MS;
+      out.push(ACT_T5_SHOW, type_);
+      break;
+    case T5_RESPONSE:
+      responseArmed_ = !in.level(LV_LICK1_CONTACT);
+      out.push(ACT_T5_DARK); setTimeout(T5_RESPONSE_MS); break;
+    case T5_CONSUME:
+      setTimeout(T5_CONSUME_MS); break;
+    case T5_PUNISH:
+      duration_ = T5_PUNISH_MS; out.push(ACT_T5_GRAY); break;
+  }
+}
+
 // ===========================================================================
 //  REGISTRATION
 // ===========================================================================
@@ -683,12 +798,14 @@ static LickRewardTask     g_task1;
 static CuedRewardTask     g_task2;
 static DiscriminationTask g_task3;
 static RewardToneTask     g_task4;
+static VisualGoNoGoTask   g_task5;
 
 static const TaskSpec TASK_TABLE[] = {
   { 1, &g_task1 },
   { 2, &g_task2 },
   { 3, &g_task3 },
   { 4, &g_task4 },
+  { 5, &g_task5 },
 };
 static const uint8_t TASK_TABLE_N = sizeof(TASK_TABLE) / sizeof(TASK_TABLE[0]);
 

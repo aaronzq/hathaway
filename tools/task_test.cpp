@@ -57,6 +57,12 @@ unsigned long T3_TEACH_INCLUDE_NO_RESPONSE = 1;
 unsigned long T3_EARLY_LICK_PUNISH = 1;
 unsigned long T3_EARLY_LICK_PAUSE_MS = 100;
 
+unsigned long T5_SAMPLE_MS = 2000, T5_RESPONSE_MS = 1000;
+unsigned long T5_CONSUME_MS = 1000, T5_PUNISH_MS = 3000, T5_ITI_MS = 3000;
+unsigned long T5_MAX_REPEAT = 3, T5_PROB_S1 = 50;
+unsigned long T5_ANTI_BIAS_AUTO_ENABLE = 0, T5_ANTI_BIAS_WIN = 10;
+unsigned long T5_ANTI_BIAS_ACC_THRESH = 75;
+
 // The random source task 3 draws its trial type from. On the firmware this is
 // esp_random(); here it is a scripted ring, so a whole trial SEQUENCE can be
 // asserted rather than just one trial. The task reads it modulo 100 against a
@@ -1347,7 +1353,7 @@ static void test_task3_outcomes_account_for_every_trial() {
 
   bool one_each = true;
   for (uint8_t o = 0; o < OUTCOME_COUNT; o++)
-    if (t->outcomeCount(o) != 1) one_each = false;
+    if (t->outcomeCount(o) != (o <= OUTCOME_TEACH ? 1u : 0u)) one_each = false;
   check(one_each, "one of each, including TEACH");
 }
 
@@ -1692,7 +1698,128 @@ static void test_millis_rollover() {
 }
 
 
+// Backlight onset is explicit: a late transfer must delay the SAMPLE timer,
+// and gray transfer time must not consume the punishment interval.
+static void test_task5() {
+  Task *t = taskById(5);
+  if (!t) return;
+  Inputs in;
+  ActionQueue q;
+  in.now = 100;
+  auto step = [&](uint32_t dt, uint32_t events, bool position) {
+    in.now += dt; in.events = events;
+    in.levels = position ? LV_IN_POSITION : 0;
+    q.clear(); t->step(in, q);
+  };
+  auto begin = [&](bool go) {
+    T5_PROB_S1 = go ? 100 : 0;
+    t->reset(in.now); in.displayOn = false;
+    step(0, 0, true);
+    check(t->state()==(go ? T5_SAMPLE1 : T5_SAMPLE2), "T5 chooses sample on entry without advance preparation");
+    step(3000, 0, true);
+    check(t->state()==(go ? T5_SAMPLE1 : T5_SAMPLE2), "transfer time does not consume sample duration");
+    in.displayOn = true; in.displayOnMs = in.now;
+  };
+  begin(true);
+  in.levels |= LV_LICK1_CONTACT;
+  in.now += 2000; in.events = 0;
+  q.clear(); t->step(in, q); in.displayOn = false;
+  in.now++; in.events = EV_LICK1;
+  q.clear(); t->step(in, q);
+  check(t->trial()==0 && t->state()==T5_RESPONSE,
+        "contact begun in SAMPLE cannot score after debounce crosses boundary");
+  step(1,0,true); // release
+  step(1,EV_LICK1,true);
+  check(t->lastOutcome()==OUTCOME_HIT,"fresh lick after release can score");
+  begin(true);
+  step(1999, EV_LICK1, true);
+  check(t->trial()==0 && t->state()==T5_SAMPLE1, "sample licks ignored");
+  step(1, EV_LICK1, true); in.displayOn=false;
+  check(t->state()==T5_RESPONSE && t->trial()==0, "boundary lick ignored");
+  step(1, EV_LICK2, true);
+  check(t->trial()==0, "spout 2 ignored");
+  step(1, EV_LICK1, true);
+  check(t->lastOutcome()==OUTCOME_HIT && t->state()==T5_CONSUME, "go lick gives HIT");
+  bool water=false;
+  for(uint8_t i=0;i<q.size();i++) if(q.at(i).verb==ACT_REWARD && q.at(i).a0==1) water=true;
+  check(water, "HIT delivers spout 1 water immediately");
+  step(1, 0, false);
+  check(t->state()==T5_IDLE && t->trial()==1 && t->lastOutcome()==OUTCOME_HIT,
+        "leaving consume preserves HIT exactly once");
+  begin(false); step(2000, 0, true); in.displayOn=false;
+  step(1, EV_LICK1, true);
+  check(t->state()==T5_PUNISH && t->lastOutcome()==OUTCOME_FA, "no-go lick immediately gives FA");
+  step(35, 0, true);
+  check(t->state()==T5_PUNISH, "gray transfer is not punishment time");
+  in.displayOn=true; in.displayOnMs=in.now;
+  step(2999,0,true); check(t->state()==T5_PUNISH,"full gray duration");
+  step(1,0,true); check(t->state()==T5_ITI,"punishment ends at gray deadline");
+  in.displayOn=false;
+  step(3000,0,true); check(t->state()==T5_SAMPLE2,"ITI chooses next SAMPLE directly");
+  in.displayOn=true; in.displayOnMs=in.now;
+  step(2000,0,true); in.displayOn=false; step(1,EV_LICK1,true);
+  step(1,0,false);
+  check(t->state()==T5_IDLE && t->lastOutcome()==OUTCOME_FA,"leaving punishment preserves FA");
+  for (bool go : {true,false}) {
+    begin(go); step(2000,0,true); in.displayOn=false;
+    step(1000,EV_LICK1,true);
+    check(t->state()==T5_ITI && t->lastOutcome()==(go?OUTCOME_MISS:OUTCOME_CR),
+          "deadline wins over simultaneous lick");
+    step(1,0,false); check(t->state()==T5_IDLE && t->trial()==1,"ITI departure retains outcome");
+    begin(go); step(1,EV_LICK1,false);
+    check(t->state()==T5_IDLE && t->lastOutcome()==OUTCOME_ABORT,"sample departure aborts");
+    begin(go); step(2000,0,true); in.displayOn=false;
+    step(1000,EV_LICK1,false);
+    check(t->lastOutcome()==OUTCOME_ABORT,"departure wins over deadline and lick");
+  }
+}
+
+static void test_task5_selection() {
+  Task *t=taskById(5); if(!t) return;
+  Inputs in; ActionQueue q;
+  in.now=100; in.levels=LV_IN_POSITION;
+  auto step=[&](uint32_t ms=0, uint32_t events=0) {
+    in.now+=ms; in.events=events; q.clear(); t->step(in,q);
+    for(uint8_t i=0;i<q.size();i++) {
+      if(q.at(i).verb==ACT_T5_SHOW) {in.displayOn=true; in.displayOnMs=in.now;}
+      if(q.at(i).verb==ACT_T5_DARK) in.displayOn=false;
+      if(q.at(i).verb==ACT_T5_GRAY) {in.displayOn=true; in.displayOnMs=in.now;}
+    }
+  };
+  T5_PROB_S1=100; T5_ANTI_BIAS_AUTO_ENABLE=0; T5_MAX_REPEAT=3;
+  t->reset(in.now); step(); step();
+  for(int i=0;i<4;i++) {
+    check(t->state()==(i<3?T5_SAMPLE1:T5_SAMPLE2), "T5 caps identical samples at three");
+    step(2000); step(1000); step(3000);
+  }
+  T5_ANTI_BIAS_AUTO_ENABLE=1; T5_ANTI_BIAS_WIN=2; T5_MAX_REPEAT=100;
+  setRand({0,99,0,0,0});
+  t->reset(in.now); step(); step();
+  uint8_t p=0;
+  check(t->takeT5Prob1(p) && p==50,"T5 auto bias cold start is 50");
+  step(2000); step(1000); // sample 1 MISS
+  step(3000); check(t->state()==T5_SAMPLE2,"scripted no-go sample");
+  step(2000); step(1000); // sample 2 CR
+  step(3000);
+  check(t->takeT5Prob1(p) && p==90,"MISS versus CR biases toward sample 1");
+  in.levels=0; step(); // abort does not enter anti-bias window
+  in.levels=LV_IN_POSITION; step();
+  check(t->takeT5Prob1(p) && p==90,"ABORT excluded from T5 anti-bias history");
+  t->clearT5AntiBiasHistory();
+  in.levels=0; step(); in.levels=LV_IN_POSITION; step();
+  check(t->takeT5Prob1(p) && p==50,"clearing T5 anti-bias returns to cold start");
+  setRand({0,99,99}); t->reset(in.now); step(); step();
+  step(2000); step(1,EV_LICK1); step(1000); step(3000); // HIT
+  step(2000); step(1,EV_LICK1); step(3000); step(3000); // FA
+  check(t->takeT5Prob1(p) && p==10,"HIT versus FA biases toward sample 2");
+  T5_ANTI_BIAS_AUTO_ENABLE=0; T5_ANTI_BIAS_WIN=10; T5_MAX_REPEAT=3; T5_PROB_S1=50;
+  setRand({});
+}
+
 int main() {
+  check(taskById(5) != nullptr, "task 5 is registered");
+  test_task5();
+  test_task5_selection();
   test_task1_basic();
   test_task1_shared_gate_uses_that_spouts_interval();
   test_task1_disabled_spout();

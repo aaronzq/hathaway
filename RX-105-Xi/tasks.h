@@ -314,6 +314,34 @@ private:
 //  static storage duration so nothing is ever allocated at run time.
 // ===========================================================================
 
+enum : uint8_t {
+  T5_IDLE = 0, T5_SAMPLE1, T5_SAMPLE2, T5_RESPONSE,
+  T5_CONSUME, T5_PUNISH, T5_ITI, T5_STATE_COUNT
+};
+
+class VisualGoNoGoTask : public Task {
+public:
+  const char *name() const override { return "VISUAL_GO_NOGO"; }
+  uint8_t stateCount() const override { return T5_STATE_COUNT; }
+  const char *stateName(uint8_t s) const override;
+  bool safeToSwitch() const override { return state() == T5_IDLE || state() == T5_ITI; }
+  void reset(uint32_t now) override;
+  bool takeT5Prob1(uint8_t &prob) override;
+  void clearT5AntiBiasHistory() override;
+protected:
+  uint8_t onEvent(uint8_t s, const Inputs &in, ActionQueue &out) override;
+  void onEntry(uint8_t s, const Inputs &in, ActionQueue &out) override;
+private:
+  void finish(uint8_t outcome);
+  uint8_t effectiveProb1() const;
+  struct Trial { uint8_t type, outcome; };
+  Trial history_[100];
+  uint8_t head_ = 0, count_ = 0, type_ = 1, lastType_ = 0, run_ = 0;
+  uint8_t probability_ = 50;
+  bool reportProb_ = false, responseArmed_ = false;
+  uint32_t duration_ = 0;
+};
+
 struct TaskSpec {
   uint8_t  id;
   Task    *task;

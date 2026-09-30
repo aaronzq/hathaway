@@ -126,6 +126,7 @@ struct CmdSpec {
   float       lo, hi;            // inclusive accepted range (params only)
   void      (*apply)(float v);   // optional; runs on the CONTROL core
   bool        ack;               // emit an ack line after applying
+  bool      (*valid)(float v) = nullptr; // optional parameter constraint
 };
 
 // Table macros. The parameter macros stringify the variable name, so the wire
@@ -327,6 +328,10 @@ inline ParseResult protoParseCommand(const CmdSpec *ct, size_t ctN,
   }
   if (val < ct[slot].lo || val > ct[slot].hi) {
     snprintf(err, errcap, "#ERR range: %s=%g", name, val);
+    return PARSE_ERR;
+  }
+  if (ct[slot].valid && !ct[slot].valid((float)val)) {
+    snprintf(err, errcap, "#ERR unsupported: %s=%g", name, val);
     return PARSE_ERR;
   }
   out->slot = (uint8_t)slot; out->value = (float)val;

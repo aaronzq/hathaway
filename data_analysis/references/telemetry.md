@@ -47,11 +47,26 @@ Outcome codes are append-only because they are stored in `OUTCOME.channel`.
 | 0 | `HIT` | Correct response; tasks 1, 2, and 4 report their completed trials as hits |
 | 1 | `INCORRECT` | Task 3 responded on the wrong spout |
 | 2 | `NO_RESPONSE` | Task-3 response window ended without an answer |
-| 3 | `ABORT` | Task-3 trial ended before it could be answered |
+| 3 | `ABORT` | Task-3 or task-5 trial ended before it could be answered |
 | 4 | `TEACH` | Task-3 failed trial rescued with water; not a hit |
+| 5 | `MISS` | Task 5: no response to sample 1 |
+| 6 | `FA` | Task 5: lick response to sample 2 (false alarm) |
+| 7 | `CR` | Task 5: withheld response to sample 2 (correct rejection) |
 
 Task-3 discrimination accuracy is `HIT / (HIT + INCORRECT)`. State the
 denominator explicitly for response, completion, teaching, and abort rates.
+
+Task 5 logs actual backlight commands as `DISPLAY` samples: 0 dark, 1 grating,
+2 gray, -1 drawing failure. These are electrical command times, not measured
+optical onset. `T5_ANGLE`, `T5_CONTRAST`, `T5_PERIOD`, and `T5_SPEED` events at
+sample onset record the displayed stimulus, with sample number in channel.
+`T5_PROB1` is the draw probability before the repeat cap, reported at sample onset.
+Stimulus changes apply at the next SAMPLE entry; an ongoing sample retains
+its recorded settings. Unsupported hardware-scroll angles near 90/270 degrees
+are rejected by SET. No database migration or historical relabeling is needed.
+
+Task-5 hit rate is `HIT / (HIT + MISS)` and false-alarm rate is `FA / (FA + CR)`.
+Exclude ABORT and separate tasks before calculating performance.
 
 ## Rail command codes
 

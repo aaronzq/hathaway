@@ -75,6 +75,7 @@ class RigState:
         self.weight_buf = deque(maxlen=WEIGHT_AVG_N)  # raw weights for the moving avg
         self.active_task = None               # TASK telemetry: the task actually running
         self.t3_prob1 = None                  # latest effective task-3 type-1 probability
+        self.t5_prob1 = None
         # Rail position in mm. Unlike weight this is not a stream: the rig
         # reports it only when a command moves the rail, at boot, and in reply
         # to a DUMP. So it is displayed as-is with no averaging, and it is
@@ -102,6 +103,7 @@ class RigState:
             "weight": self.weight_avg(),      # moving average (display only)
             "active_task": self.active_task,
             "t3_prob1": self.t3_prob1,
+            "t5_prob1": self.t5_prob1,
             "rail_mm": self.rail_mm,
             "counts": dict(self.counts),
             "dropped": self.dropped,
@@ -404,6 +406,10 @@ class Controller:
                 st.active_task = int(r["value"])
                 if st.active_task != 3:
                     st.t3_prob1 = None
+                if st.active_task != 5:
+                    st.t5_prob1 = None
+            if r["type"] == "T5_PROB1":
+                st.t5_prob1 = r["value"]
             if r["type"] == "T3_PROB1":
                 st.t3_prob1 = r["value"]
             if r["type"] == "RAIL_POS":
@@ -814,7 +820,7 @@ HTML_PAGE = """<!doctype html>
         <div id="t3probBox" style="display:none">
           <hr>
           <div class="w small" style="margin-top:0" id="ctlt3prob">&mdash;</div>
-          <div class="wl">T3 prob1</div>
+          <div class="wl" id="probLabel">Sample 1 probability</div>
         </div>
       </div>
     </div>
@@ -953,8 +959,10 @@ function renderControl(state){
   const params=r.params||{};
   const paramTask=Number(params['TASK']);
   const activeTask=(r.active_task!=null)?Number(r.active_task):paramTask;
-  pbox.style.display=(activeTask===3)?'block':'none';
-  prob.textContent=(activeTask===3&&r.t3_prob1!=null)?(Math.round(r.t3_prob1)+'%'):'\\u2014';
+  pbox.style.display=(activeTask===3||activeTask===5)?'block':'none';
+  document.getElementById('probLabel').textContent='T'+activeTask+' sample 1 probability';
+  const drawProb=activeTask===5?r.t5_prob1:r.t3_prob1;
+  prob.textContent=((activeTask===3||activeTask===5)&&drawProb!=null)?(Math.round(drawProb)+'%'):'\\u2014';
   Object.keys(params).forEach(function(name){
     ensureCtlRow(rig,name);
     ctlRows[name].querySelector('[data-cur]').textContent=params[name];});

@@ -45,6 +45,13 @@ Task         *g_task       = nullptr;
 unsigned long g_activeTask = 0;
 ActionQueue   g_actions;
 
+// State-entry drawing only; transfers wait until both valves are closed.
+// 0 = no request, 1/2 = sample, 3 = gray, 4 = black.
+uint8_t g_t5Draw = 0;
+uint32_t g_displayOnMs = 0;
+bool g_displayOn = false;
+
+
 // Last buzzer state reported to the host, so the TONE sample is emitted once on
 // each edge and never repeated.
 //
@@ -122,6 +129,9 @@ enum : uint8_t {
   TELEM_T3_PROB1, // channel 1, value = effective type-1 draw probability %
   TELEM_RAIL_CMD, // channel = RAIL_CMD_* disposition, value = commanded mm
   TELEM_RAIL_POS, // channel 1, value = rail position in mm
+  TELEM_T5_PROB1,
+  TELEM_DISPLAY, // channel 1; 0 dark, 1 grating, 2 gray, -1 drawing failed
+  TELEM_T5_ANGLE, TELEM_T5_CONTRAST, TELEM_T5_PERIOD, TELEM_T5_SPEED,
   TELEM_MAG_CMD,  // channel = MAG_CMD_* disposition, value = 0
 };
 
@@ -179,6 +189,12 @@ static const TelemSpec TELEM_TABLE[] = {
   { TELEM_RAIL_CMD, "RAIL_CMD", TELEM_EVENT  },
   { TELEM_RAIL_POS, "RAIL_POS", TELEM_SAMPLE },
   { TELEM_MAG_CMD,  "MAG_CMD",  TELEM_EVENT  },
+  { TELEM_T5_PROB1, "T5_PROB1", TELEM_SAMPLE },
+  { TELEM_DISPLAY, "DISPLAY", TELEM_SAMPLE },
+  { TELEM_T5_ANGLE, "T5_ANGLE", TELEM_EVENT },
+  { TELEM_T5_CONTRAST, "T5_CONTRAST", TELEM_EVENT },
+  { TELEM_T5_PERIOD, "T5_PERIOD", TELEM_EVENT },
+  { TELEM_T5_SPEED, "T5_SPEED", TELEM_EVENT },
 };
 static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 
@@ -334,6 +350,13 @@ static void doRailStop(float) {
   g_railDeadline = now + 500u;          // deceleration is milliseconds
 }
 
+static void applyT5AntiBiasAuto(float v) {
+  if ((unsigned long)v == 0) taskById(5)->clearT5AntiBiasHistory();
+}
+static bool validT5Angle(float v) {
+  return GratingHandler::supportsHardwareScroll(v);
+}
+
 static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(REWARD_DURATION1,  0,   1000,  applyRewardDuration1),
   PARAM_U32(REWARD_DURATION2,  0,   1000,  applyRewardDuration2),
@@ -348,7 +371,7 @@ static const CmdSpec CMD_TABLE[] = {
   // TASK is applied lazily, at the next trial boundary -- see serviceTask().
   // The PARAM ack therefore means "request accepted"; the TASK telemetry line
   // marks the cycle on which the switch actually happened.
-  PARAM_U32(TASK,              1,   4,     nullptr),
+  PARAM_U32(TASK,              1,   5,     nullptr),
   PARAM_U32(T1_SPOUT1_ENABLE,  0,   1,     nullptr),
   PARAM_U32(T1_SPOUT2_ENABLE,  0,   1,     nullptr),
   // Automatic rail retraction. See behavior_task.h for what it does and the two
@@ -402,6 +425,24 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(T3_TEACH_INCLUDE_INCORRECT, 0, 1, nullptr),
   PARAM_U32(T3_TEACH_INCLUDE_NO_RESPONSE, 0, 1, nullptr),
   
+  // Task 5. Hardware scrolling excludes 90/270 degrees; reject them on SET.
+  { "T5_S1_ANGLE", CMD_PARAM, STORE_F32, &T5_S1_ANGLE, 0, 360, nullptr, true, validT5Angle },
+  { "T5_S2_ANGLE", CMD_PARAM, STORE_F32, &T5_S2_ANGLE, 0, 360, nullptr, true, validT5Angle },
+  PARAM_F32(T5_S1_CONTRAST, 0, 1, nullptr),
+  PARAM_F32(T5_S2_CONTRAST, 0, 1, nullptr),
+  PARAM_F32(T5_PERIOD, 2, 320, nullptr),
+  PARAM_F32(T5_SPEED, -1000, 1000, nullptr),
+  PARAM_U32(T5_SAMPLE_MS, 1, 30000, nullptr),
+  PARAM_U32(T5_RESPONSE_MS, 1, 30000, nullptr),
+  PARAM_U32(T5_CONSUME_MS, 0, 30000, nullptr),
+  PARAM_U32(T5_PUNISH_MS, 0, 30000, nullptr),
+  PARAM_U32(T5_ITI_MS, 0, 30000, nullptr),
+  PARAM_U32(T5_MAX_REPEAT, 1, 100, nullptr),
+  PARAM_U32(T5_PROB_S1, 0, 100, nullptr),
+  PARAM_U32(T5_ANTI_BIAS_AUTO_ENABLE, 0, 1, applyT5AntiBiasAuto),
+  PARAM_U32(T5_ANTI_BIAS_WIN, 1, 100, nullptr),
+  PARAM_U32(T5_ANTI_BIAS_ACC_THRESH, 0, 100, nullptr),
+
   ACTION(TARE, doTare),
   ACTION(MAG_START, doMagStart),
 
@@ -434,6 +475,10 @@ static const size_t CMD_COUNT = sizeof(CMD_TABLE) / sizeof(CMD_TABLE[0]);
 static Inputs sense() {
   Inputs in;
   in.now = millis();
+  in.displayOn = g_displayOn;
+  in.displayOnMs = g_displayOnMs;
+  if (digitalRead(LICK1_PIN) == HIGH || lick1.getState() == HIGH)
+    in.levels |= LV_LICK1_CONTACT;
 
   // --- licks -------------------------------------------------------------
   // Logged whether or not the spout is enabled: a disabled spout is still a
@@ -545,6 +590,19 @@ static void act(const ActionQueue &q, uint32_t now) {
   for (uint8_t i = 0; i < q.size(); i++) {
     const Action &a = q.at(i);
     switch (a.verb) {
+      case ACT_T5_DARK:
+        grating.setBacklight(false); grating.stopAnimation(); g_displayOn=false;
+        g_t5Draw=4;
+        Comms::emit(TELEM_DISPLAY, 1, 0, millis());
+        break;
+      case ACT_T5_SHOW:
+        grating.setBacklight(false); grating.stopAnimation(); g_displayOn=false;
+        g_t5Draw=a.a0;
+        break;
+      case ACT_T5_GRAY:
+        grating.setBacklight(false); grating.stopAnimation(); g_displayOn=false;
+        g_t5Draw=3;
+        break;
       case ACT_REWARD:
         // No enable check here. A task that must not water a spout simply does
         // not ask -- task 1 filters the lick, task 2 gives that spout no block.
@@ -618,6 +676,9 @@ static void serviceTask(uint32_t now) {
     Comms::emit(TELEM_TONE, 1, 0.0f, now);   // sense() report it, so the
     g_pulseOn = false;                       // incoming task sees no stray
   }                                          // EV_TONE_DONE on its first cycle
+  grating.setBacklight(false); grating.stopAnimation();
+  g_displayOn=false; g_t5Draw=0;
+  Comms::emit(TELEM_DISPLAY, 1, 0, millis());
   g_toneOn = false;
   g_task       = next;
   g_activeTask = TASK;
@@ -716,11 +777,8 @@ void setup() {
 
   randomSeed(esp_random());   // hardware RNG seed so trials differ each run
 
-  // The grating is initialised but no longer driven from loop(): none of the
-  // current tasks use the display, and pushing a sprite every frame was the
-  // largest single source of loop-period jitter. To bring it back, call
-  // grating.update() from loop() and drive it from a new ACT_ verb.
-  grating.switchOn(false);
+  // Display remains dark until task 5 has drawn and transferred its sample.
+  grating.setBacklight(false);
 
   Comms::begin(RIG_ID, TELEM_TABLE, TELEM_COUNT, CMD_TABLE, CMD_COUNT);
   Comms::setDumpHook(dumpExtraState);
@@ -741,6 +799,45 @@ void setup() {
   serviceTask(millis());
 }
 
+static void serviceT5Display() {
+  if (g_activeTask != 5) return;
+  if (!g_t5Draw) {
+    grating.update(); // running only while SAMPLE is visible
+    return;
+  }
+  // Never let a synchronous transfer hold a reward valve open past its deadline.
+  if (rewarder1.busy() || rewarder2.busy()) return;
+  uint8_t request=g_t5Draw;
+  g_t5Draw=0;
+  grating.setBacklight(false);
+  if (request == 4) {
+    grating.fillColor(0,0,0);
+    return;
+  }
+  if (request == 3) {
+    grating.fillColor(128,128,128);
+  } else {
+    float angle=request == 1 ? T5_S1_ANGLE : T5_S2_ANGLE;
+    float contrast=request == 1 ? T5_S1_CONTRAST : T5_S2_CONTRAST;
+    if (!GratingHandler::supportsHardwareScroll(angle) ||
+        !grating.drawGrating(T5_PERIOD, angle, contrast) ||
+        !grating.startAnimation(T5_SPEED)) {
+      Comms::emit(TELEM_DISPLAY, 1, -1, millis());
+      return;
+    }
+  }
+  // Timed exposure starts only after generation and transmission have finished.
+  grating.setBacklight(true);
+  g_displayOnMs=millis(); g_displayOn=true;
+  Comms::emit(TELEM_DISPLAY, 1, request == 3 ? 2 : 1, g_displayOnMs);
+  if (request != 3) {
+    Comms::emit(TELEM_T5_ANGLE, request, request == 1 ? T5_S1_ANGLE : T5_S2_ANGLE, g_displayOnMs);
+    Comms::emit(TELEM_T5_CONTRAST, request, request == 1 ? T5_S1_CONTRAST : T5_S2_CONTRAST, g_displayOnMs);
+    Comms::emit(TELEM_T5_PERIOD, request, T5_PERIOD, g_displayOnMs);
+    Comms::emit(TELEM_T5_SPEED, request, T5_SPEED, g_displayOnMs);
+  }
+}
+
 void loop() {
   Comms::service();          // apply any parameter changes the host sent
 
@@ -759,6 +856,10 @@ void loop() {
   if (g_task->takeT3Prob1(t3Prob1))
     Comms::emit(TELEM_T3_PROB1, 1, (float)t3Prob1, in.now);
 
+  uint8_t t5Prob1;
+  if (g_task->takeT5Prob1(t5Prob1))
+    Comms::emit(TELEM_T5_PROB1, 1, (float)t5Prob1, in.now);
+
   // Log the state entered before the actions it triggered, so the log reads in
   // causal order. A counter rather than a state comparison, so that re-entering
   // the same state is still recorded.
@@ -775,4 +876,5 @@ void loop() {
 
   rewarder1.update();
   rewarder2.update();
+  serviceT5Display();
 }

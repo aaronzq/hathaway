@@ -123,6 +123,15 @@ static void test_nan_is_rejected() {
 }
 
 int main() {
+  // Exercise the optional validator without duplicating a device's policy.
+  CmdSpec constrained = {"LIMITED", CMD_PARAM, STORE_F32, &PARAM_B, 0, 10, nullptr, true,
+                         [](float value) { return value != 5; }};
+  CmdMsg m; char err[128];
+  check(protoParseCommand(&constrained, 1, "SET LIMITED 5", &m, err, sizeof(err)) == PARSE_ERR &&
+        std::strcmp(err, "#ERR unsupported: LIMITED=5") == 0,
+        "custom constraint rejects an otherwise in-range value");
+  check(protoParseCommand(&constrained, 1, "SET LIMITED 6", &m, err, sizeof(err)) == PARSE_OK && m.value == 6,
+        "custom constraint accepts a supported value");
   test_existing_commands_still_parse();
   test_action_values_parse();
   test_bad_lines_are_rejected();

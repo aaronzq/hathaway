@@ -25,16 +25,6 @@ extern const float RAIL_CALIBRATION_MM_TO_PULSE = 1510.0f;
 extern const uint32_t RAIL_DIRECTION_DELAY_US = 200u;
 
 
-// TFT display
-const float ANGLES[]    = {0, 45, 90, 135};
-const float CONTRASTS[] = {0.2f, 0.4f, 0.6f, 0.8f, 1.0f};
-const int   NUM_ANGLES    = sizeof(ANGLES) / sizeof(ANGLES[0]);
-const int   NUM_CONTRASTS = sizeof(CONTRASTS) / sizeof(CONTRASTS[0]);
-
-const float PERIOD = 45.0f;  // grating period, px
-const float SPEED  = 160.0f; // drift speed, px/s
-
-
 // Buzzer
 const unsigned int FREQS[] = {3000, 6000, 9000, 12000};
 const int   NUM_FREQS = sizeof(FREQS) / sizeof(FREQS[0]);
@@ -68,6 +58,7 @@ float SCALE_LOW_THRESH  = 10.0;
 //                       lick spout 1 or 2 -> water or timeout
 //   4 = REWARD_TONE     in position -> lick active spout -> water plus tone ->
 //                       gate -> wait for the next lick
+//   5 = VISUAL_GO_NOGO  45 degree go / 135 degree no-go, spout 1 only
 // The switch is DEFERRED until the running task reaches a trial boundary, so
 // setting this mid-trial is safe. The TASK telemetry line marks the cycle on
 // which it actually took effect.
@@ -128,17 +119,6 @@ unsigned long T2_CUE_TO_WATER = 100;    // cue ONSET -> licks count, ms. Licks
 // and then nothing, which is the task's way of saying "stop".
 unsigned long T2_N1 = 3;
 unsigned long T2_N2 = 3;
-
-// --- task 4 ----------------------------------------------------------------
-// The tone begins in the same control cycle as water delivery. Unlike task 2,
-// there is no cue on arrival and no cue-to-water delay.
-unsigned long T4_CUE_FREQ = 6000;   // reward-associated tone frequency, Hz
-unsigned long T4_CUE_DUR  = 100;    // reward-associated tone duration, ms
-
-// Same block alternation and zero-to-retire convention as task 2, but these
-// settings are independent so changing one task cannot alter the other.
-unsigned long T4_N1 = 3;
-unsigned long T4_N2 = 3;
 
 // --- task 3 ----------------------------------------------------------------
 // Two-tone discrimination with a delay. Trial type 1 plays T3_SAMPLE_FREQ1 and
@@ -241,4 +221,40 @@ unsigned long T3_EARLY_LICK_PAUSE_MS = 100;  // quiet pause before delay replays
 // layer itself stays free of hardware: tools/task_test.cpp defines its own
 // version returning a scripted sequence, which is what makes a trial sequence
 // reproducible under test.
+
+// --- task 4 ----------------------------------------------------------------
+// The tone begins in the same control cycle as water delivery. Unlike task 2,
+// there is no cue on arrival and no cue-to-water delay.
+unsigned long T4_CUE_FREQ = 6000;   // reward-associated tone frequency, Hz
+unsigned long T4_CUE_DUR  = 100;    // reward-associated tone duration, ms
+
+// Same block alternation and zero-to-retire convention as task 2, but these
+// settings are independent so changing one task cannot alter the other.
+unsigned long T4_N1 = 3;
+unsigned long T4_N2 = 3;
+
+
+// --- task 5 ----------------------------------------------------------------
+// Task 5 display. Angles are degrees in the renderer's coordinate system;
+// contrast is 0..1, period is pixels, speed is pixels/second.
+// Stimulus edits take effect at the next SAMPLE entry, never mid-sample.
+float T5_S1_ANGLE = 45.0f;
+float T5_S2_ANGLE = 135.0f;
+float T5_S1_CONTRAST = 1.0f;
+float T5_S2_CONTRAST = 1.0f;
+float T5_PERIOD = 45.0f;
+float T5_SPEED = 160.0f;
+
+unsigned long T5_SAMPLE_MS = 2000;
+unsigned long T5_RESPONSE_MS = 1000;
+unsigned long T5_CONSUME_MS = 1000;
+unsigned long T5_PUNISH_MS = 3000;
+unsigned long T5_ITI_MS = 1000;
+unsigned long T5_MAX_REPEAT = 3;
+unsigned long T5_PROB_S1 = 50;
+unsigned long T5_ANTI_BIAS_AUTO_ENABLE = 0;
+unsigned long T5_ANTI_BIAS_WIN = 10;
+unsigned long T5_ANTI_BIAS_ACC_THRESH = 75;
+
+
 uint32_t task_rand32() { return esp_random(); }

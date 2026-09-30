@@ -18,3 +18,9 @@ g++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -I. -Ishim \
     -o protocol_test protocol_test.cpp
 
 ./protocol_test
+
+# Display rendering and direct transfer behavior, using a simulated panel (no hardware).
+g++ -std=c++17 -Wall -Wextra -Wno-unused-parameter -Idisplay_shim \
+    -o grating_test grating_test.cpp ../RX-105-Xi/grating.cpp
+
+./grating_test

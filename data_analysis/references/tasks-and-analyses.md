@@ -25,6 +25,16 @@ Use these boundaries for the current firmware. State numbers are task-specific.
 | 2 | Entry to `CUE` (1) | Entry to `REFRACTORY` (3), when the accepted lick triggers reward; `HIT`. The refractory wait follows completion. |
 | 3 | Entry to `SAMPLE1` (1) or `SAMPLE2` (2) | Entry to `ITI` (8); outcome is `HIT`, `INCORRECT`, `NO_RESPONSE`, `ABORT`, or `TEACH`. The ITI wait follows completion. |
 | 4 | Entry to `WAIT_LICK` (1) | Entry to `REFRACTORY` (2), when the accepted lick triggers reward and tone; `HIT`. The refractory wait follows completion. |
+| 5 | Entry to `SAMPLE1` (1) or `SAMPLE2` (2); use `DISPLAY=1` for backlight onset | HIT at entry to `CONSUME` (4), FA at entry to `PUNISH` (5), MISS/CR at entry to `ITI` (6), ABORT at entry to `IDLE` (0) from SAMPLE/RESPONSE. Each trial is counted once at that decision. |
+
+Task 5 departures always enter IDLE immediately. Departures during CONSUME,
+PUNISH, or ITI preserve the existing outcome. Sample and punishment durations
+start at backlight onset, after the image transfer finishes. Each SAMPLE entry
+chooses a fresh sample using the probability, anti-bias, and repeat-limit rules,
+then generates and transmits that grating with the backlight off. No images are
+cached or prepared in IDLE/ITI. Gray and black are filled on demand. A drawing
+failure leaves SAMPLE dark until departure or reset; display transfers wait for
+both reward valves to close.
 
 For a requested session:
 

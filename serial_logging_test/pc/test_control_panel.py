@@ -95,5 +95,32 @@ class ClosePortTest(unittest.TestCase):
         )
 
 
+class Task5PanelTest(unittest.TestCase):
+    def test_old_and_new_outcome_codes_survive_ingestion(self):
+        ctrl = control_panel.Controller(DummyDB())
+        ctrl.on_line("COM1", "1|#DEF OUTCOME,E")
+        for code in range(8):
+            ctrl.on_line("COM1", f"1|OUTCOME:{code},{code+1},{100+code}")
+        outcomes = []
+        while not ctrl.recq.empty():
+            item = ctrl.recq.get_nowait()
+            if isinstance(item[1], list):
+                outcomes.extend(r for r in item[1] if r["type"] == "OUTCOME")
+        self.assertEqual([r["channel"] for r in outcomes], list(range(8)))
+        self.assertTrue(all(r["kind"] == "E" for r in outcomes))
+
+    def test_task5_probability_and_parameters_are_exposed(self):
+        ctrl = control_panel.Controller(DummyDB())
+        ctrl.on_line("COM1", "1|#DEF T5_PROB1,S")
+        ctrl.on_line("COM1", "1|TASK:5,5,100")
+        ctrl.on_line("COM1", "1|PARAM:T5_S1_ANGLE,45,100")
+        ctrl.on_line("COM1", "1|T5_PROB1:1,90,101")
+        state = ctrl.rigs[1].snapshot()
+        self.assertEqual(state["params"]["T5_S1_ANGLE"], 45)
+        self.assertEqual(state["t5_prob1"], 90)
+        ctrl.on_line("COM1", "1|TASK:3,3,200")
+        self.assertIsNone(ctrl.rigs[1].snapshot()["t5_prob1"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -65,6 +65,7 @@ enum : uint32_t {
   // in particular, and scoring it against either one would be wrong. Set for
   // manual moves too, since the rail is equally in transit either way.
   LV_RAIL_BUSY   = 1u << 4,
+  LV_LICK1_CONTACT = 1u << 5, // raw OR debounced contact, for boundary suppression
 };
 
 
@@ -77,6 +78,8 @@ struct Inputs {
   uint32_t t_lick1 = 0;    // capture time of EV_LICK1, if set this cycle
   uint32_t t_lick2 = 0;
   float    weight  = 0.0f;
+  uint32_t displayOnMs = 0;  // actual backlight-on time
+  bool displayOn = false;
 
   bool has(uint32_t ev)   const { return (events & ev) != 0; }
   bool level(uint32_t lv) const { return (levels & lv) != 0; }
@@ -109,6 +112,9 @@ enum : uint8_t {
   // it through the same rail entry point the operator's Move button uses, so
   // the interlock and the position logging are shared rather than duplicated.
   ACT_RAIL_STEP,
+  ACT_T5_SHOW,    // a0 = sample 1/2; draw, upload, then enable backlight
+  ACT_T5_DARK,    // disable backlight and animation
+  ACT_T5_GRAY,    // request gray; enable backlight after transfer
 };
 
 struct Action {
@@ -168,6 +174,9 @@ enum : uint8_t {
   // because nothing was discriminated -- performance is hit/(hit+incorrect),
   // and TEACH + NO_RESPONSE together are the trials that went unanswered.
   OUTCOME_TEACH,
+  OUTCOME_MISS,
+  OUTCOME_FA,
+  OUTCOME_CR,
   OUTCOME_COUNT,
 };
 
@@ -203,6 +212,8 @@ public:
   virtual bool takeT3Prob1(uint8_t &prob) { (void)prob; return false; }
   virtual void clearT3AntiBiasHistory() {}
   virtual void clearT1RailWindow() {}
+  virtual bool takeT5Prob1(uint8_t &prob) { (void)prob; return false; }
+  virtual void clearT5AntiBiasHistory() {}
 
   // True only when the task is at a trial boundary. The sketch defers a
   // requested task switch until this returns true, so a switch can never land
@@ -268,5 +279,5 @@ private:
   uint32_t transitions_  = 0;
   bool     entered_      = false;
   uint8_t  lastOutcome_  = OUTCOME_HIT;
-  uint32_t outcomes_[OUTCOME_COUNT] = {0, 0, 0, 0, 0};
+  uint32_t outcomes_[OUTCOME_COUNT] = {};
 };
