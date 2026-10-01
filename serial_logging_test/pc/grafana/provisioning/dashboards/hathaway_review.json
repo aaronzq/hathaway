@@ -276,7 +276,7 @@
       },
       "type": "timeseries",
       "title": "Lick, Reward & Outcome events",
-      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart. TEACH is an unanswered trial rescued with water at the correct spout.",
+      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart. TEACH is an unanswered trial rescued with water at the correct spout. Task 5: MISS and FA share INCORRECT red; CR shares HIT green. Outcome labels remain distinct.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -331,7 +331,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Outcome rows. All five sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach.\r\n--\r\n-- Kept as separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
+          "rawSql": "-- Outcome rows. All outcomes sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach, 5 miss, 6 false alarm, 7 correct rejection.\r\n--\r\n-- Kept as separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts) ORDER BY t_us"
         },
         {
           "refId": "F",
@@ -635,8 +635,12 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "orange"
+                  "fixedColor": "semi-dark-red"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "MISS"
               }
             ]
           },
@@ -650,8 +654,12 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "red"
+                  "fixedColor": "semi-dark-red"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "FA"
               }
             ]
           },
@@ -667,6 +675,10 @@
                   "mode": "fixed",
                   "fixedColor": "green"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "CR"
               }
             ]
           }
@@ -701,8 +713,8 @@
         "h": 5
       },
       "type": "timeseries",
-      "title": "Mouse position, Magnet and Buzzer state",
-      "description": "Three 0/1 state traces, offset into separate bands so they never overlap: POSITION 0-1, MAGNET 1.5-2.5, BUZZER 3-4. The offsets are applied in SQL; the stored values are all 0/1 (and for TONE, the frequency in Hz).",
+      "title": "Mouse position, Magnet, Buzzer and Display state",
+      "description": "State traces in separate bands: POSITION 0-1, MAGNET 1.5-2.5, BUZZER 3-4, DISPLAY 4.5-5.5. Display is 4.5 when the backlight is off and 5.5 when on, for both gratings and solid fills. Display type and stimulus settings remain in the database; drawing failures are plotted as backlight off.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -739,6 +751,16 @@
           "editorMode": "code",
           "rawQuery": true,
           "rawSql": "-- Offset into the 3..4 band: 4 while a note sounds, 3 when silent.\r\n-- (TONE stores the frequency in Hz, so 'sounding' is value > 0.)\r\n--\r\n-- The first branch is the carry-in, same as POSITION and MAGNET above: it\r\n-- looks just before the window, takes the last known state and draws it at\r\n-- the left edge, so the line starts there instead of at the first row inside\r\n-- the window. Bounded to 10 minutes -- unbounded it would reach back days into\r\n-- an earlier session and paint a flat 'silent' line across a window that has\r\n-- no tone data at all.\r\n--\r\n-- Session review uses dev_ts for both row selection and plotting, so the\r\n-- selected range follows the device clock even if the PC wall clock changes.\r\n(SELECT $__timeFrom()::timestamptz AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE'\r\n    AND rig_id = $rig AND session_id = $session AND dev_ts <  $__timeFrom()::timestamptz\r\n    AND dev_ts >= $__timeFrom()::timestamptz - interval '10 minutes'\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE' AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts))\r\nORDER BY time"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "(SELECT $__timeFrom()::timestamptz AS time, CASE WHEN value > 0 THEN 5.5 ELSE 4.5 END AS display FROM samples_dev WHERE type = 'DISPLAY' AND host_ts >= (SELECT started_at FROM sessions WHERE session_id = $session) AND host_ts <= (SELECT COALESCE(ended_at, now()) FROM sessions WHERE session_id = $session) AND rig_id = $rig AND session_id = $session AND dev_ts < $__timeFrom() ORDER BY t_us DESC LIMIT 1) UNION ALL (SELECT dev_ts AS time, CASE WHEN value > 0 THEN 5.5 ELSE 4.5 END AS display FROM samples_dev WHERE type = 'DISPLAY' AND host_ts >= (SELECT started_at FROM sessions WHERE session_id = $session) AND host_ts <= (SELECT COALESCE(ended_at, now()) FROM sessions WHERE session_id = $session) AND rig_id = $rig AND session_id = $session AND $__timeFilter(dev_ts)) ORDER BY time"
         }
       ],
       "fieldConfig": {
@@ -780,7 +802,7 @@
               "mode": "off"
             }
           },
-          "max": 4.1,
+          "max": 5.6,
           "min": -0.1,
           "thresholds": {
             "mode": "absolute",
@@ -910,7 +932,7 @@
       },
       "type": "piechart",
       "title": "Trial outcomes  --  $total_trials trials in session $session",
-      "description": "How the selected session's trials ended inside the selected time range. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach. Task 5 adds 5 miss, 6 false alarm, 7 correct rejection; HIT and ABORT retain their existing codes.",
+      "description": "How the selected session's trials ended inside the selected time range. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach. Task 5 adds 5 miss, 6 false alarm, 7 correct rejection; HIT and ABORT retain their existing codes. Task 5: MISS and FA share INCORRECT red; CR shares HIT green. Outcome labels remain distinct.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -925,7 +947,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\n       count(*) FILTER (WHERE channel = 4) AS \"teach\",\n       count(*) FILTER (WHERE channel = 5) AS \"miss\",\n       count(*) FILTER (WHERE channel = 6) AS \"false alarm\",\n       count(*) FILTER (WHERE channel = 7) AS \"correct rejection\"\n  FROM events_dev\n WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(dev_ts)"
+          "rawSql": "WITH counts AS (\n-- Count outcomes using the existing session and time filters.\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\n       count(*) FILTER (WHERE channel = 4) AS \"teach\",\n       count(*) FILTER (WHERE channel = 5) AS \"miss\",\n       count(*) FILTER (WHERE channel = 6) AS \"false alarm\",\n       count(*) FILTER (WHERE channel = 7) AS \"correct rejection\"\n  FROM events_dev\n WHERE type = 'OUTCOME' AND session_id = $session AND $__timeFilter(dev_ts)\n)\nSELECT outcome.key AS outcome, outcome.value::bigint AS count\nFROM counts CROSS JOIN LATERAL jsonb_each_text(to_jsonb(counts)) AS outcome\nWHERE outcome.value::bigint > 0"
         }
       ],
       "fieldConfig": {
@@ -1049,8 +1071,12 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "orange"
+                  "fixedColor": "semi-dark-red"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "MISS"
               }
             ]
           },
@@ -1064,8 +1090,12 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "red"
+                  "fixedColor": "semi-dark-red"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "FA"
               }
             ]
           },
@@ -1081,6 +1111,10 @@
                   "mode": "fixed",
                   "fixedColor": "green"
                 }
+              },
+              {
+                "id": "displayName",
+                "value": "CR"
               }
             ]
           }
@@ -1114,7 +1148,13 @@
           "hideZeros": false
         },
         "sort": "desc"
-      }
+      },
+      "transformations": [
+        {
+          "id": "rowsToFields",
+          "options": {}
+        }
+      ]
     },
     {
       "id": 7,

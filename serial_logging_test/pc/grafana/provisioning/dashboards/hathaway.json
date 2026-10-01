@@ -269,7 +269,7 @@
       },
       "type": "timeseries",
       "title": "Lick, Reward & Outcome events",
-      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.\n\nTEACH (purple) is an unanswered trial that was rescued with water at the correct spout, on T3_TEACH_PROB percent of them. It produces a REWARD event too, so a purple mark with no preceding lick is the signature of a rescue.",
+      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.\n\nTEACH (purple) is an unanswered trial that was rescued with water at the correct spout, on T3_TEACH_PROB percent of them. It produces a REWARD event too, so a purple mark with no preceding lick is the signature of a rescue. Task 5: MISS and FA share INCORRECT red; CR shares HIT green. Outcome labels remain distinct.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -324,7 +324,7 @@
           "format": "time_series",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- Outcome rows. All four sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort.\r\n--\r\n-- Kept as four separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+          "rawSql": "-- Outcome rows. All outcomes sit at y = 5 (reward2 + 1.5) so they read as one\r\n-- row, told apart by colour rather than by height. channel is the OUTCOME_*\r\n-- code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach, 5 miss, 6 false alarm, 7 correct rejection.\r\n--\r\n-- Kept as separate queries rather than one CASE, so each outcome is its\r\n-- own Grafana series and can be given its own colour and hidden from the\r\n-- legend independently.\r\nSELECT dev_ts AS time, 5 AS hit FROM events_dev WHERE type = 'OUTCOME' AND channel = 0 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
         },
         {
           "refId": "F",
@@ -369,6 +369,39 @@
           "editorMode": "code",
           "rawQuery": true,
           "rawSql": "SELECT dev_ts AS time, 5 AS teach FROM events_dev WHERE type = 'OUTCOME' AND channel = 4 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "J",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS \"miss\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 5 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "K",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS \"false alarm\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 6 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
+        },
+        {
+          "refId": "L",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "editorMode": "code",
+          "rawQuery": true,
+          "rawSql": "SELECT dev_ts AS time, 5 AS \"correct rejection\" FROM events_dev WHERE type = 'OUTCOME' AND channel = 7 AND rig_id = $rig AND $__timeFilter(host_ts) ORDER BY t_us"
         }
       ],
       "fieldConfig": {
@@ -565,6 +598,63 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "miss"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "MISS"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "false alarm"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "FA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "correct rejection"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "CR"
+              }
+            ]
           }
         ]
       },
@@ -597,8 +687,8 @@
         "h": 5
       },
       "type": "timeseries",
-      "title": "Mouse position, Magnet and Buzzer state",
-      "description": "Three 0/1 state traces, offset into separate bands so they never overlap: POSITION 0-1, MAGNET 1.5-2.5, BUZZER 3-4. The offsets are applied in SQL; the stored values are all 0/1 (and for TONE, the frequency in Hz).",
+      "title": "Mouse position, Magnet, Buzzer and Display state",
+      "description": "State traces in separate bands: POSITION 0-1, MAGNET 1.5-2.5, BUZZER 3-4, DISPLAY 4.5-5.5. Display is 4.5 when the backlight is off and 5.5 when on, for both gratings and solid fills. Display type and stimulus settings remain in the database; drawing failures are plotted as backlight off.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -635,6 +725,16 @@
           "editorMode": "code",
           "rawQuery": true,
           "rawSql": "-- Offset into the 3..4 band: 4 while a note sounds, 3 when silent.\r\n-- (TONE stores the frequency in Hz, so 'sounding' is value > 0.)\r\n--\r\n-- The first branch is the carry-in, same as POSITION and MAGNET above: it\r\n-- looks just before the window, takes the last known state and draws it at\r\n-- the left edge, so the line starts there instead of at the first row inside\r\n-- the window. Bounded to 10 minutes -- unbounded it would reach back days into\r\n-- an earlier session and paint a flat 'silent' line across a window that has\r\n-- no tone data at all.\r\n--\r\n-- Filters are on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks. dev_ts is computed per row, so\r\n-- filtering on it means scanning every chunk on every refresh. dev_ts is still\r\n-- what gets PLOTTED; only the row selection uses host_ts, and the two never\r\n-- differ by more than the serial read cycle.\r\n(SELECT $__timeFrom()::timestamptz AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE'\r\n    AND rig_id = $rig AND host_ts <  $__timeFrom()::timestamptz\r\n    AND host_ts >= $__timeFrom()::timestamptz - interval '10 minutes'\r\n  ORDER BY t_us DESC LIMIT 1)\r\nUNION ALL\r\n(SELECT dev_ts AS time,\r\n        CASE WHEN value > 0 THEN 4 ELSE 3 END AS buzzer\r\n   FROM samples_dev\r\n  WHERE type = 'TONE' AND rig_id = $rig AND $__timeFilter(host_ts))\r\nORDER BY time"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "postgres",
+            "uid": "hathaway_pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "(SELECT $__timeFrom()::timestamptz AS time, CASE WHEN value > 0 THEN 5.5 ELSE 4.5 END AS display FROM samples_dev WHERE type = 'DISPLAY' AND rig_id = $rig AND host_ts < $__timeFrom() ORDER BY host_ts DESC, t_us DESC LIMIT 1) UNION ALL (SELECT dev_ts AS time, CASE WHEN value > 0 THEN 5.5 ELSE 4.5 END AS display FROM samples_dev WHERE type = 'DISPLAY' AND rig_id = $rig AND $__timeFilter(host_ts)) ORDER BY time"
         }
       ],
       "fieldConfig": {
@@ -676,7 +776,7 @@
               "mode": "off"
             }
           },
-          "max": 4.1,
+          "max": 5.6,
           "min": -0.1,
           "thresholds": {
             "mode": "absolute",
@@ -806,7 +906,7 @@
       },
       "type": "piechart",
       "title": "Trial outcomes  --  $total_trials trials in current session",
-      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach. Every completed trial is booked under exactly one of them, so the five slices add up to the total in the title.\n\nREADING IT: discrimination performance is HIT/(HIT+INCORRECT). TEACH is an unanswered trial that was rescued with free water at the correct spout -- it gave water without testing anything, so it is NOT a success, and TEACH + NO RESPONSE together are the trials that went unanswered. Note the rewards gauge counts teach water too, so it tracks water delivered rather than water earned.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Does NOT match the sum of 'Trials per hour', which covers the whole day across all sessions.",
+      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach, 5 miss, 6 false alarm, 7 correct rejection. Every completed trial is booked under exactly one of them, so the outcome slices add up to the total in the title.\n\nREADING IT (Task 3): discrimination performance is HIT/(HIT+INCORRECT). TEACH is an unanswered trial that was rescued with free water at the correct spout -- it gave water without testing anything, so it is NOT a success, and TEACH + NO RESPONSE together are the trials that went unanswered. Note the rewards gauge counts teach water too, so it tracks water delivered rather than water earned.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Does NOT match the sum of 'Trials per hour', which covers the whole day across all sessions. Task 5: MISS and FA share INCORRECT red; CR shares HIT green. Outcome labels remain distinct.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -821,7 +921,7 @@
           "format": "table",
           "editorMode": "code",
           "rawQuery": true,
-          "rawSql": "-- One row, one column per outcome: the pie makes a slice of each column.\r\n--\r\n-- Gated to the current session exactly as 'Cumulative rewards (Session)' is:\r\n-- the max session_id, plus the start of the local day. The day bound matters\r\n-- for a session that has run past midnight -- it keeps the pie on today's\r\n-- part of it.\r\n--\r\n-- Filtered on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks.\r\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\r\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\r\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\r\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\r\n       count(*) FILTER (WHERE channel = 4) AS \"teach\"\r\n  FROM events_dev,\r\n       (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d\r\n WHERE type = 'OUTCOME'\r\n   AND session_id = (SELECT max(session_id) FROM sessions WHERE rig_id = $rig)\r\n   AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n   AND host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'"
+          "rawSql": "WITH counts AS (\n-- Count outcomes using the existing session and time filters.\r\n--\r\n-- Gated to the current session exactly as 'Cumulative rewards (Session)' is:\r\n-- the max session_id, plus the start of the local day. The day bound matters\r\n-- for a session that has run past midnight -- it keeps the pie on today's\r\n-- part of it.\r\n--\r\n-- Filtered on host_ts, not dev_ts: host_ts is indexed and is the hypertable\r\n-- partition key, so Postgres can skip chunks.\r\nSELECT count(*) FILTER (WHERE channel = 0) AS \"hit\",\r\n       count(*) FILTER (WHERE channel = 1) AS \"incorrect\",\r\n       count(*) FILTER (WHERE channel = 2) AS \"no response\",\r\n       count(*) FILTER (WHERE channel = 3) AS \"abort\",\r\n       count(*) FILTER (WHERE channel = 4) AS \"teach\",\r\n       count(*) FILTER (WHERE channel = 5) AS \"miss\",\r\n       count(*) FILTER (WHERE channel = 6) AS \"false alarm\",\r\n       count(*) FILTER (WHERE channel = 7) AS \"correct rejection\"\r\n  FROM events_dev,\r\n       (SELECT date_trunc('day', now() AT TIME ZONE 'America/Los_Angeles') AS lm) d\r\n WHERE type = 'OUTCOME'\r\n   AND session_id = (SELECT max(session_id) FROM sessions WHERE rig_id = $rig)\r\n   AND host_ts >= d.lm AT TIME ZONE 'America/Los_Angeles'\r\n   AND host_ts <  (d.lm + interval '1 day') AT TIME ZONE 'America/Los_Angeles'\n)\nSELECT outcome.key AS outcome, outcome.value::bigint AS count\nFROM counts CROSS JOIN LATERAL jsonb_each_text(to_jsonb(counts)) AS outcome\nWHERE outcome.value::bigint > 0"
         }
       ],
       "fieldConfig": {
@@ -934,6 +1034,63 @@
                 "value": "TEACH"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "miss"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "MISS"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "false alarm"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "semi-dark-red"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "FA"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "correct rejection"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "CR"
+              }
+            ]
           }
         ]
       },
@@ -965,7 +1122,13 @@
           "hideZeros": false
         },
         "sort": "desc"
-      }
+      },
+      "transformations": [
+        {
+          "id": "rowsToFields",
+          "options": {}
+        }
+      ]
     },
     {
       "id": 7,
