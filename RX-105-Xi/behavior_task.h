@@ -244,6 +244,10 @@ float T5_S1_CONTRAST = 1.0f;
 float T5_S2_CONTRAST = 1.0f;
 float T5_PERIOD = 45.0f;
 float T5_SPEED = 160.0f;
+// Punishment fill, RGB channels 0..255; applied at the next punishment draw.
+unsigned long T5_PUNISH_R = 128;
+unsigned long T5_PUNISH_G = 128;
+unsigned long T5_PUNISH_B = 128;
 
 unsigned long T5_SAMPLE_MS = 2000;
 unsigned long T5_RESPONSE_MS = 1000;

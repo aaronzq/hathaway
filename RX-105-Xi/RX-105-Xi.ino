@@ -130,7 +130,7 @@ enum : uint8_t {
   TELEM_RAIL_CMD, // channel = RAIL_CMD_* disposition, value = commanded mm
   TELEM_RAIL_POS, // channel 1, value = rail position in mm
   TELEM_T5_PROB1,
-  TELEM_DISPLAY, // channel 1; 0 dark, 1 grating, 2 gray, -1 drawing failed
+  TELEM_DISPLAY, // channel 1; 0 dark, 1 grating, 2 punishment fill, -1 drawing failed
   TELEM_T5_ANGLE, TELEM_T5_CONTRAST, TELEM_T5_PERIOD, TELEM_T5_SPEED,
   TELEM_MAG_CMD,  // channel = MAG_CMD_* disposition, value = 0
 };
@@ -432,6 +432,9 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_F32(T5_S2_CONTRAST, 0, 1, nullptr),
   PARAM_F32(T5_PERIOD, 2, 320, nullptr),
   PARAM_F32(T5_SPEED, -1000, 1000, nullptr),
+  PARAM_U32(T5_PUNISH_R, 0, 255, nullptr),
+  PARAM_U32(T5_PUNISH_G, 0, 255, nullptr),
+  PARAM_U32(T5_PUNISH_B, 0, 255, nullptr),
   PARAM_U32(T5_SAMPLE_MS, 1, 30000, nullptr),
   PARAM_U32(T5_RESPONSE_MS, 1, 30000, nullptr),
   PARAM_U32(T5_CONSUME_MS, 0, 30000, nullptr),
@@ -815,7 +818,7 @@ static void serviceT5Display() {
     return;
   }
   if (request == 3) {
-    grating.fillColor(128,128,128);
+    grating.fillColor(T5_PUNISH_R, T5_PUNISH_G, T5_PUNISH_B);
   } else {
     float angle=request == 1 ? T5_S1_ANGLE : T5_S2_ANGLE;
     float contrast=request == 1 ? T5_S1_CONTRAST : T5_S2_CONTRAST;

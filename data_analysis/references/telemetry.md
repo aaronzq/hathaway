@@ -57,10 +57,16 @@ Task-3 discrimination accuracy is `HIT / (HIT + INCORRECT)`. State the
 denominator explicitly for response, completion, teaching, and abort rates.
 
 Task 5 logs actual backlight commands as `DISPLAY` samples: 0 dark, 1 grating,
-2 gray, -1 drawing failure. These are electrical command times, not measured
+2 punishment fill, -1 drawing failure. These are electrical command times, not measured
 optical onset. `T5_ANGLE`, `T5_CONTRAST`, `T5_PERIOD`, and `T5_SPEED` events at
 sample onset record the displayed stimulus, with sample number in channel.
 `T5_PROB1` is the draw probability before the repeat cap, reported at sample onset.
+Punishment entry is `STATE` channel 5; its visible onset is `DISPLAY` value 2.
+`T5_PUNISH_R`, `T5_PUNISH_G`, and `T5_PUNISH_B` set the solid fill (0..255,
+default 128 each). Their timestamped `PARAM_T5_PUNISH_*` records specify the
+color in effect at the punishment draw, not necessarily at trial start.
+The screen converts these RGB values to its RGB565 color format. A color edit
+during visible punishment takes effect only at the next punishment draw.
 Stimulus changes apply at the next SAMPLE entry; an ongoing sample retains
 its recorded settings. Unsupported hardware-scroll angles near 90/270 degrees
 are rejected by SET. No database migration or historical relabeling is needed.
