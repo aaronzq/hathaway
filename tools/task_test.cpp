@@ -1816,7 +1816,93 @@ static void test_task5_selection() {
   setRand({});
 }
 
+// Task 6 must keep a fixed response window even after rewarding.
+unsigned long T6_SAMPLE_MS = 2000, T6_RESPONSE_MS = 1000;
+static void test_task6() {
+  Task *t = taskById(6);
+  check(t != nullptr, "task 6 is registered");
+  if (!t) return;
+  Inputs in; ActionQueue q;
+  in.now = 100;
+  auto state = [&](const char *name) { return strcmp(t->stateName(t->state()), name) == 0; };
+  auto step = [&](uint32_t dt, uint32_t events = 0, bool position = true, bool contact = false) {
+    in.now += dt; in.events = events;
+    in.levels = (position ? LV_IN_POSITION : 0) | (contact ? LV_LICK1_CONTACT : 0);
+    q.clear(); t->step(in, q);
+    for (uint8_t i=0; i<q.size(); ++i)
+      if (q.at(i).verb == ACT_T5_DARK) in.displayOn = false;
+  };
+  auto rewards = [&]() {
+    unsigned n = 0;
+    for (uint8_t i=0; i<q.size(); ++i) if (q.at(i).verb == ACT_REWARD) {
+      ++n;
+      check(q.at(i).a0 == 1 && q.at(i).a1 == 0, "T6 uses spout 1 default reward duration");
+    }
+    return n;
+  };
+  auto visible = [&]() { in.displayOn = true; in.displayOnMs = in.now; };
+  auto begin = [&]() {
+    t->reset(in.now); in.displayOn = false;
+    step(0, 0, false);
+    check(state("IDLE") && !in.displayOn && t->safeToSwitch(), "T6 waits dark in IDLE");
+    step(0);
+    check(state("SAMPLE") && q.size()==1 && q.at(0).verb==ACT_T6_SHOW,
+          "T6 starts its fixed grating on entry");
+    step(3000, EV_LICK1);
+    check(state("SAMPLE") && rewards()==0, "T6 waits for real display onset");
+    visible();
+  };
+  unsigned long savedInterval = REWARD_INTERVAL1;
+  REWARD_INTERVAL1 = 60000;
+  begin();
+  step(1999, EV_LICK1);
+  check(state("SAMPLE") && rewards()==0, "T6 ignores sample licks");
+  step(1, EV_LICK1, true, true);
+  check(state("RESPONSE") && !in.displayOn && rewards()==0, "T6 dark response ignores boundary lick");
+  step(1, EV_LICK1, true, true);
+  check(rewards()==0, "T6 held sample contact cannot reward");
+  step(1); step(1, EV_LICK2);
+  check(rewards()==0, "T6 ignores spout 2");
+  step(1, EV_LICK1);
+  check(rewards()==1 && state("RESPONSE") && t->trial()==1, "T6 rewards once without ending response");
+  step(995, EV_LICK1);
+  check(rewards()==0 && state("RESPONSE"), "T6 blocks repeat reward until next cycle");
+  step(1, EV_LICK1);
+  check(rewards()==0 && state("SAMPLE"), "T6 response ends at original 1000 ms deadline");
+  visible(); step(2000); step(1, EV_LICK1);
+  check(rewards()==1, "T6 next response rewards despite 60000 ms reward interval");
+  step(1, EV_LICK1, false);
+  check(state("IDLE") && rewards()==0 && t->trial()==2 && t->lastOutcome()==OUTCOME_HIT,
+        "T6 departure after reward preserves outcome once");
+  step(0); visible(); step(2000); step(1000, EV_LICK1);
+  check(state("SAMPLE") && rewards()==0 && t->lastOutcome()==OUTCOME_MISS,
+        "T6 unanswered deadline restarts sample and wins over lick");
+  step(1, EV_LICK1, false);
+  check(state("IDLE") && !in.displayOn && t->lastOutcome()==OUTCOME_ABORT,
+        "T6 sample departure aborts dark without reward");
+  step(0); visible(); step(2000); step(1, EV_LICK1, false);
+  check(state("IDLE") && rewards()==0 && t->lastOutcome()==OUTCOME_ABORT,
+        "T6 response departure wins over lick");
+  in.now = 0xFFFFFF00u;
+  t->reset(in.now); in.displayOn = false; step(0); visible();
+  step(2000); step(999, EV_LICK1);
+  check(state("RESPONSE") && rewards()==1, "T6 timers survive clock rollover");
+  step(1); visible(); step(2000); step(1, EV_LICK1);
+  check(rewards()==1, "T6 late then early rewards can be about 2000 ms apart");
+  // A reset after a reward must not carry the reward latch into a new session.
+  T6_SAMPLE_MS = 50; T6_RESPONSE_MS = 20;
+  t->reset(in.now); in.displayOn = false; step(0); visible();
+  step(49); check(state("SAMPLE"), "T6 uses configured sample duration");
+  step(1); step(1, EV_LICK1);
+  check(state("RESPONSE") && rewards()==1 && t->trial()==1, "T6 reset clears reward latch");
+  step(18); check(state("RESPONSE"), "T6 configured response lasts full duration");
+  step(1); check(state("SAMPLE"), "T6 uses configured response duration");
+  T6_SAMPLE_MS = 2000; T6_RESPONSE_MS = 1000;
+  REWARD_INTERVAL1 = savedInterval;
+}
+
 int main() {
+  test_task6();
   check(taskById(5) != nullptr, "task 5 is registered");
   test_task5();
   test_task5_selection();

@@ -59,6 +59,7 @@ float SCALE_LOW_THRESH  = 10.0;
 //   4 = REWARD_TONE     in position -> lick active spout -> water plus tone ->
 //                       gate -> wait for the next lick
 //   5 = VISUAL_GO_NOGO  45 degree go / 135 degree no-go, spout 1 only
+//   6 = VISUAL_REWARD   fixed grating -> timed response, spout 1 only
 // The switch is DEFERRED until the running task reaches a trial boundary, so
 // setting this mid-trial is safe. The TASK telemetry line marks the cycle on
 // which it actually took effect.
@@ -262,3 +263,13 @@ unsigned long T5_ANTI_BIAS_ACC_THRESH = 75;
 
 
 uint32_t task_rand32() { return esp_random(); }
+
+// --- task 6 ----------------------------------------------------------------
+// Repeating sample/response cycle; at most one reward per response.
+// REWARD_DURATION1 controls water delivery; REWARD_INTERVAL1 is not used.
+float T6_ANGLE = 45.0f;
+float T6_CONTRAST = 1.0f;
+float T6_PERIOD = 45.0f;
+float T6_SPEED = 160.0f;
+unsigned long T6_SAMPLE_MS = 2000;
+unsigned long T6_RESPONSE_MS = 1000;

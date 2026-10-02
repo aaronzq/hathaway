@@ -133,6 +133,7 @@ enum : uint8_t {
   TELEM_DISPLAY, // channel 1; 0 dark, 1 grating, 2 punishment fill, -1 drawing failed
   TELEM_T5_ANGLE, TELEM_T5_CONTRAST, TELEM_T5_PERIOD, TELEM_T5_SPEED,
   TELEM_MAG_CMD,  // channel = MAG_CMD_* disposition, value = 0
+  TELEM_T6_ANGLE, TELEM_T6_CONTRAST, TELEM_T6_PERIOD, TELEM_T6_SPEED,
 };
 
 // What happened to a MAG_START from the panel. The "#MAG_START ok" ack only
@@ -195,6 +196,10 @@ static const TelemSpec TELEM_TABLE[] = {
   { TELEM_T5_CONTRAST, "T5_CONTRAST", TELEM_EVENT },
   { TELEM_T5_PERIOD, "T5_PERIOD", TELEM_EVENT },
   { TELEM_T5_SPEED, "T5_SPEED", TELEM_EVENT },
+  { TELEM_T6_ANGLE, "T6_ANGLE", TELEM_EVENT },
+  { TELEM_T6_CONTRAST, "T6_CONTRAST", TELEM_EVENT },
+  { TELEM_T6_PERIOD, "T6_PERIOD", TELEM_EVENT },
+  { TELEM_T6_SPEED, "T6_SPEED", TELEM_EVENT },
 };
 static const size_t TELEM_COUNT = sizeof(TELEM_TABLE) / sizeof(TELEM_TABLE[0]);
 
@@ -371,7 +376,7 @@ static const CmdSpec CMD_TABLE[] = {
   // TASK is applied lazily, at the next trial boundary -- see serviceTask().
   // The PARAM ack therefore means "request accepted"; the TASK telemetry line
   // marks the cycle on which the switch actually happened.
-  PARAM_U32(TASK,              1,   5,     nullptr),
+  PARAM_U32(TASK,              1,   6,     nullptr),
   PARAM_U32(T1_SPOUT1_ENABLE,  0,   1,     nullptr),
   PARAM_U32(T1_SPOUT2_ENABLE,  0,   1,     nullptr),
   // Automatic rail retraction. See behavior_task.h for what it does and the two
@@ -435,6 +440,12 @@ static const CmdSpec CMD_TABLE[] = {
   PARAM_U32(T5_PUNISH_R, 0, 255, nullptr),
   PARAM_U32(T5_PUNISH_G, 0, 255, nullptr),
   PARAM_U32(T5_PUNISH_B, 0, 255, nullptr),
+  { "T6_ANGLE", CMD_PARAM, STORE_F32, &T6_ANGLE, 0, 360, nullptr, true, validT5Angle },
+  PARAM_F32(T6_CONTRAST, 0, 1, nullptr),
+  PARAM_F32(T6_PERIOD, 2, 320, nullptr),
+  PARAM_F32(T6_SPEED, -1000, 1000, nullptr),
+  PARAM_U32(T6_SAMPLE_MS, 1, 30000, nullptr),
+  PARAM_U32(T6_RESPONSE_MS, 1, 30000, nullptr),
   PARAM_U32(T5_SAMPLE_MS, 1, 30000, nullptr),
   PARAM_U32(T5_RESPONSE_MS, 1, 30000, nullptr),
   PARAM_U32(T5_CONSUME_MS, 0, 30000, nullptr),
@@ -601,6 +612,10 @@ static void act(const ActionQueue &q, uint32_t now) {
       case ACT_T5_SHOW:
         grating.setBacklight(false); grating.stopAnimation(); g_displayOn=false;
         g_t5Draw=a.a0;
+        break;
+      case ACT_T6_SHOW:
+        grating.setBacklight(false); grating.stopAnimation(); g_displayOn=false;
+        g_t5Draw=6;
         break;
       case ACT_T5_GRAY:
         grating.setBacklight(false); grating.stopAnimation(); g_displayOn=false;
@@ -803,7 +818,7 @@ void setup() {
 }
 
 static void serviceT5Display() {
-  if (g_activeTask != 5) return;
+  if (g_activeTask != 5 && g_activeTask != 6) return;
   if (!g_t5Draw) {
     grating.update(); // running only while SAMPLE is visible
     return;
@@ -820,11 +835,13 @@ static void serviceT5Display() {
   if (request == 3) {
     grating.fillColor(T5_PUNISH_R, T5_PUNISH_G, T5_PUNISH_B);
   } else {
-    float angle=request == 1 ? T5_S1_ANGLE : T5_S2_ANGLE;
-    float contrast=request == 1 ? T5_S1_CONTRAST : T5_S2_CONTRAST;
+    float angle=request == 6 ? T6_ANGLE : (request == 1 ? T5_S1_ANGLE : T5_S2_ANGLE);
+    float contrast=request == 6 ? T6_CONTRAST : (request == 1 ? T5_S1_CONTRAST : T5_S2_CONTRAST);
+    float period=request == 6 ? T6_PERIOD : T5_PERIOD;
+    float speed=request == 6 ? T6_SPEED : T5_SPEED;
     if (!GratingHandler::supportsHardwareScroll(angle) ||
-        !grating.drawGrating(T5_PERIOD, angle, contrast) ||
-        !grating.startAnimation(T5_SPEED)) {
+        !grating.drawGrating(period, angle, contrast) ||
+        !grating.startAnimation(speed)) {
       Comms::emit(TELEM_DISPLAY, 1, -1, millis());
       return;
     }
@@ -833,7 +850,12 @@ static void serviceT5Display() {
   grating.setBacklight(true);
   g_displayOnMs=millis(); g_displayOn=true;
   Comms::emit(TELEM_DISPLAY, 1, request == 3 ? 2 : 1, g_displayOnMs);
-  if (request != 3) {
+  if (request == 6) {
+    Comms::emit(TELEM_T6_ANGLE, 1, T6_ANGLE, g_displayOnMs);
+    Comms::emit(TELEM_T6_CONTRAST, 1, T6_CONTRAST, g_displayOnMs);
+    Comms::emit(TELEM_T6_PERIOD, 1, T6_PERIOD, g_displayOnMs);
+    Comms::emit(TELEM_T6_SPEED, 1, T6_SPEED, g_displayOnMs);
+  } else if (request != 3) {
     Comms::emit(TELEM_T5_ANGLE, request, request == 1 ? T5_S1_ANGLE : T5_S2_ANGLE, g_displayOnMs);
     Comms::emit(TELEM_T5_CONTRAST, request, request == 1 ? T5_S1_CONTRAST : T5_S2_CONTRAST, g_displayOnMs);
     Comms::emit(TELEM_T5_PERIOD, request, T5_PERIOD, g_displayOnMs);

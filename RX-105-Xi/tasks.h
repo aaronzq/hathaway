@@ -342,6 +342,24 @@ private:
   uint32_t duration_ = 0;
 };
 
+// Task 6: fixed visual sample followed by one rewarded lick per timed response.
+// Leaving position returns to IDLE; reward timing never uses REWARD_INTERVAL1.
+enum : uint8_t { T6_IDLE = 0, T6_SAMPLE, T6_RESPONSE, T6_STATE_COUNT };
+
+class VisualRewardTask : public Task {
+public:
+  const char *name() const override { return "VISUAL_REWARD"; }
+  uint8_t stateCount() const override { return T6_STATE_COUNT; }
+  const char *stateName(uint8_t s) const override;
+  bool safeToSwitch() const override { return state() == T6_IDLE; }
+protected:
+  uint8_t onEvent(uint8_t s, const Inputs &in, ActionQueue &out) override;
+  void onEntry(uint8_t s, const Inputs &in, ActionQueue &out) override;
+private:
+  bool rewarded_ = false, responseArmed_ = false;
+  uint32_t duration_ = 0;
+};
+
 struct TaskSpec {
   uint8_t  id;
   Task    *task;

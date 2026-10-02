@@ -794,11 +794,70 @@ void VisualGoNoGoTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) {
 //  REGISTRATION
 // ===========================================================================
 
+extern unsigned long T6_SAMPLE_MS, T6_RESPONSE_MS;
+
+const char *VisualRewardTask::stateName(uint8_t s) const {
+  static const char *names[] = {"IDLE", "SAMPLE", "RESPONSE"};
+  return s < T6_STATE_COUNT ? names[s] : "?";
+}
+
+uint8_t VisualRewardTask::onEvent(uint8_t s, const Inputs &in, ActionQueue &out) {
+  if (s != T6_IDLE && !in.level(LV_IN_POSITION)) {
+    if (!rewarded_) countTrial(OUTCOME_ABORT);
+    return T6_IDLE;
+  }
+  switch (s) {
+    case T6_IDLE:
+      if (in.level(LV_IN_POSITION)) return T6_SAMPLE;
+      break;
+    case T6_SAMPLE:
+      if (in.displayOn && uint32_t(in.now - in.displayOnMs) >= duration_) return T6_RESPONSE;
+      break;
+    case T6_RESPONSE:
+      if (in.has(EV_TIMEOUT)) {
+        if (!rewarded_) countTrial(OUTCOME_MISS);
+        return T6_SAMPLE;
+      }
+      if (rewarded_) break;
+      if (!responseArmed_) {
+        if (!in.level(LV_LICK1_CONTACT)) responseArmed_ = true;
+        break;
+      }
+      if (in.has(EV_LICK1)) {
+        out.push(ACT_REWARD, 1, 0); // use REWARD_DURATION1, with no interval gate
+        rewarded_ = true;
+        countTrial(OUTCOME_HIT);
+      }
+      break;
+  }
+  return STAY;
+}
+
+void VisualRewardTask::onEntry(uint8_t s, const Inputs &in, ActionQueue &out) {
+  switch (s) {
+    case T6_IDLE:
+      rewarded_ = responseArmed_ = false;
+      out.push(ACT_T5_DARK);
+      break;
+    case T6_SAMPLE:
+      rewarded_ = responseArmed_ = false;
+      duration_ = T6_SAMPLE_MS;
+      out.push(ACT_T6_SHOW);
+      break;
+    case T6_RESPONSE:
+      responseArmed_ = !in.level(LV_LICK1_CONTACT);
+      out.push(ACT_T5_DARK);
+      setTimeout(T6_RESPONSE_MS);
+      break;
+  }
+}
+
 static LickRewardTask     g_task1;
 static CuedRewardTask     g_task2;
 static DiscriminationTask g_task3;
 static RewardToneTask     g_task4;
 static VisualGoNoGoTask   g_task5;
+static VisualRewardTask   g_task6;
 
 static const TaskSpec TASK_TABLE[] = {
   { 1, &g_task1 },
@@ -806,6 +865,7 @@ static const TaskSpec TASK_TABLE[] = {
   { 3, &g_task3 },
   { 4, &g_task4 },
   { 5, &g_task5 },
+  { 6, &g_task6 },
 };
 static const uint8_t TASK_TABLE_N = sizeof(TASK_TABLE) / sizeof(TASK_TABLE[0]);
 

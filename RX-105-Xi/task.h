@@ -115,6 +115,7 @@ enum : uint8_t {
   ACT_T5_SHOW,    // a0 = sample 1/2; draw, upload, then enable backlight
   ACT_T5_DARK,    // disable backlight and animation
   ACT_T5_GRAY,    // request gray; enable backlight after transfer
+  ACT_T6_SHOW,    // fixed task-6 grating; enable backlight after transfer
 };
 
 struct Action {
