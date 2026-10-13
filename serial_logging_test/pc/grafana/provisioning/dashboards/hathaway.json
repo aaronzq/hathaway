@@ -269,7 +269,7 @@
       },
       "type": "timeseries",
       "title": "Lick, Reward & Outcome events",
-      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.\n\nTEACH (purple) is an unanswered trial that was rescued with water at the correct spout, on T3_TEACH_PROB percent of them. It produces a REWARD event too, so a purple mark with no preceding lick is the signature of a rescue. Task 5: MISS and FA share INCORRECT red; CR shares HIT green. Outcome labels remain distinct.",
+      "description": "Event rasters, each series pinned to its own y so they never overlap: lick1 1, reward1 1.5, lick2 3, reward2 3.5, and every trial outcome on one row at 5 -- 1.5 above reward2, colour-coded by outcome. The y values are constants in SQL and carry no meaning beyond keeping the rows apart.\n\nTEACH (purple) is an unanswered trial that was rescued with water at the correct spout, on T3_TEACH_PROB percent of them. It produces a REWARD event too, so a purple mark with no preceding lick is the signature of a rescue. Task 5: HIT is green, MISS is red, CR is purple, FA is orange, and ABORT is blue. Outcome labels remain distinct.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -628,7 +628,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "semi-dark-red"
+                  "fixedColor": "semi-dark-orange"
                 }
               },
               {
@@ -647,7 +647,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "green"
+                  "fixedColor": "purple"
                 }
               },
               {
@@ -906,7 +906,7 @@
       },
       "type": "piechart",
       "title": "Trial outcomes  --  $total_trials trials in current session",
-      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach, 5 miss, 6 false alarm, 7 correct rejection. Every completed trial is booked under exactly one of them, so the outcome slices add up to the total in the title.\n\nREADING IT (Task 3): discrimination performance is HIT/(HIT+INCORRECT). TEACH is an unanswered trial that was rescued with free water at the correct spout -- it gave water without testing anything, so it is NOT a success, and TEACH + NO RESPONSE together are the trials that went unanswered. Note the rewards gauge counts teach water too, so it tracks water delivered rather than water earned.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Does NOT match the sum of 'Trials per hour', which covers the whole day across all sessions. Task 5: MISS and FA share INCORRECT red; CR shares HIT green. Outcome labels remain distinct.",
+      "description": "How the CURRENT session's trials ended. channel is the OUTCOME_* code from task.h: 0 hit, 1 incorrect, 2 no response, 3 abort, 4 teach, 5 miss, 6 false alarm, 7 correct rejection. Every completed trial is booked under exactly one of them, so the outcome slices add up to the total in the title.\n\nREADING IT (Task 3): discrimination performance is HIT/(HIT+INCORRECT). TEACH is an unanswered trial that was rescued with free water at the correct spout -- it gave water without testing anything, so it is NOT a success, and TEACH + NO RESPONSE together are the trials that went unanswered. Note the rewards gauge counts teach water too, so it tracks water delivered rather than water earned.\n\nSession-gated the same way as the rewards gauge beside it (max session_id + start of the local day), so the two always describe the same run. Does NOT match the sum of 'Trials per hour', which covers the whole day across all sessions. Task 5: HIT is green, MISS is red, CR is purple, FA is orange, and ABORT is blue. Outcome labels remain distinct.",
       "datasource": {
         "type": "postgres",
         "uid": "hathaway_pg"
@@ -1064,7 +1064,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "semi-dark-red"
+                  "fixedColor": "semi-dark-orange"
                 }
               },
               {
@@ -1083,7 +1083,7 @@
                 "id": "color",
                 "value": {
                   "mode": "fixed",
-                  "fixedColor": "green"
+                  "fixedColor": "purple"
                 }
               },
               {
